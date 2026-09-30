@@ -53,6 +53,7 @@ func (c *Client) handleRoomJoin(env *Envelope) {
 	}
 	c.hub.callStateMu.Lock()
 	defer c.hub.callStateMu.Unlock()
+	c.hub.promote(c)
 	if c.hub.p2p.callForUser(c.user.ID) != nil {
 		c.roomJoinError("you are already in a call")
 		return

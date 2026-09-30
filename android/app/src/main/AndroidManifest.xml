@@ -16,12 +16,13 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <!-- This is a LAN/VPN-only intranet app with no push service to wake a
          killed process, so staying exempt from Doze/App Standby is how it
          keeps receiving calls while backgrounded (see ConnectionService). -->
@@ -67,14 +68,34 @@
         <service
             android:name=".call.CallService"
             android:exported="false"
-            android:foregroundServiceType="microphone|camera|dataSync|mediaProjection" />
+            android:foregroundServiceType="microphone|camera|mediaProjection" />
 
+        <!-- specialUse has no time limit (dataSync is cut off after ~6 hours on Android 15),
+             which is what an always-on connection to the user's own server needs. -->
         <service
             android:name=".session.ConnectionService"
             android:exported="false"
-            android:foregroundServiceType="dataSync" />
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Keeps a realtime connection to the user's own self-hosted server open so calls and messages arrive without a third-party push service" />
+        </service>
 
         <receiver android:name=".call.CallActionReceiver" android:exported="false" />
+
+        <!-- Restarts the connection after a reboot or an app update. -->
+        <receiver android:name=".session.BootReceiver" android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Periodic "anything new?" check for when the OS stopped the background connection. -->
+        <service
+            android:name=".session.UnreadPollJob"
+            android:exported="false"
+            android:permission="android.permission.BIND_JOB_SERVICE" />
 
         <provider
             android:name="androidx.core.content.FileProvider"

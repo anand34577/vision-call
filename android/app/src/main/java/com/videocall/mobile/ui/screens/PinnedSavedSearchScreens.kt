@@ -15,6 +15,8 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import com.videocall.mobile.chat.Convo
+import com.videocall.mobile.chat.ChatRepository
+import com.videocall.mobile.chat.Crypto
 import com.videocall.mobile.net.Message
 import com.videocall.mobile.session.SessionManager
 import com.videocall.mobile.ui.components.Avatar
@@ -67,10 +69,18 @@ fun SearchMessagesScreen(onBack: () -> Unit) {
         if (query.isBlank()) { results = emptyList(); error = null; return }
         loading = true
         scope.launch {
-            runCatching { SessionManager.api.searchMessages(q = query.trim()) }
+            val q = query.trim()
+            runCatching { SessionManager.api.searchMessages(q = q) }
                 .onSuccess { results = it; error = null }
                 .onFailure { error = it.message ?: "Search failed" }
             loading = false
+            // The server can't read end-to-end encrypted chats, so also look
+            // through recent ones here on the phone and merge any hits in.
+            if (error == null && q.length >= 2) {
+                runCatching { ChatRepository.searchEncrypted(q) }.onSuccess { local ->
+                    results = (results + local.filter { l -> results.none { it.id == l.id } }).sortedByDescending { it.sent_at }
+                }
+            }
         }
     }
 
@@ -146,8 +156,21 @@ private fun SearchResultRow(m: Message) {
     ListItem(
         leadingContent = { Avatar(m.sender?.display_name ?: "?", m.sender?.avatar_file_id) },
         headlineContent = { Text(m.sender?.display_name ?: "Unknown") },
-        supportingContent = { Text(if (m.is_encrypted) "Encrypted message" else m.content, maxLines = 2) },
+        supportingContent = { Text(rememberPlain(m), maxLines = 2) },
         trailingContent = { Text(m.sent_at.take(10)) },
     )
     Divider()
+}
+
+/** Message text for a list row; encrypted messages are decrypted on this device. */
+@Composable
+private fun rememberPlain(m: Message): String {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val text by produceState(if (m.is_encrypted) "Decrypting…" else m.content, m.id) {
+        if (m.is_encrypted) {
+            value = runCatching { Crypto.decryptMessageContent(ctx, m.id, m.is_encrypted, m.content, m.enc_iv, m.enc_keys) }.getOrNull()
+                ?: "Encrypted message (can't decrypt on this device)"
+        }
+    }
+    return text
 }

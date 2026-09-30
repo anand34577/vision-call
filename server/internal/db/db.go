@@ -184,7 +184,7 @@ var insertTableRE = regexp.MustCompile(`(?i)^\s*INSERT\s+INTO\s+(\w+)`)
 // pgReturningIDTables are the tables db.go's callers use res.LastInsertId()
 // on after an INSERT — the only ones that need the RETURNING id rewrite.
 var pgReturningIDTables = map[string]bool{
-	"users": true, "files": true, "groups": true, "calls": true, "messages": true,
+	"users": true, "files": true, "groups": true, "calls": true, "messages": true, "polls": true, "poll_options": true,
 }
 
 // mysqlGroupsRE finds the "groups" table name, which is a reserved word in

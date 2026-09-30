@@ -31,6 +31,20 @@ object SessionManager {
     private val _me = MutableStateFlow<User?>(null)
     val me: StateFlow<User?> = _me
 
+    // The people directory, kept fresh for @mentions and pickers.
+    private val _users = MutableStateFlow<List<User>>(emptyList())
+    val users: StateFlow<List<User>> = _users
+    fun refreshUsers() {
+        if (!hasServer || _me.value == null) return
+        CoroutineScope(Dispatchers.IO).launch {
+            runCatching { api.users() }.onSuccess { _users.value = it }
+        }
+    }
+
+    // Bumped when an admin adds, changes or removes people, so open screens reload the directory.
+    private val _directoryVersion = MutableStateFlow(0)
+    val directoryVersion: StateFlow<Int> = _directoryVersion
+
     // user_id -> status ("online"/"away"/"dnd"/"offline")
     private val _presence = MutableStateFlow<Map<Long, String>>(emptyMap())
     val presence: StateFlow<Map<Long, String>> = _presence
@@ -51,6 +65,7 @@ object SessionManager {
         "deleted" to "Your account has been removed by an administrator.",
         "password_changed" to "Your password was changed. Please sign in with the new password.",
         "signed_out" to "An administrator signed you out. Please sign in again.",
+        "signed_out_remotely" to "This device was signed out from another device.",
     )
 
     fun init(context: Context) {
@@ -64,7 +79,8 @@ object SessionManager {
         ws = WsClient(api, Prefs.deviceId(appContext))
         ws.onReconnecting = { pending -> keepAwakeWhileReconnecting(pending) }
         _myStatus.value = Prefs.myStatus(appContext)
-        api.onUnauthorized = { logoutLocal() }
+        api.onUnauthorized = { logoutReason = "Your session expired. Please sign in again."; logoutLocal() }
+        ws.onAuthFailed = { logoutReason = "Your session expired. Please sign in again."; logoutLocal() }
         // Every bind() (e.g. switching servers mid-session) creates a fresh
         // WsClient, so handlers must be re-attached to it each time, else
         // incoming events keep being delivered to the orphaned old socket.
@@ -91,17 +107,38 @@ object SessionManager {
 
     val hasServer: Boolean get() = ::api.isInitialized
 
+    /**
+     * Picks the saved session back up. Only a definite "not signed in" answer
+     * (401/403) counts as signed out; if the server just can't be reached
+     * right now (no network yet, VPN still connecting) the app opens with the
+     * last known account and keeps retrying in the background instead of
+     * bouncing to the sign-in screen.
+     */
     suspend fun tryResume(): Boolean {
         if (!hasServer) return false
-        return runCatching {
-            val user = api.me()
-            onSignedIn(user)
+        return try {
+            onSignedIn(api.me())
             true
-        }.getOrDefault(false)
+        } catch (e: com.videocall.mobile.net.ApiException) {
+            if (e.status == 401 || e.status == 403) {
+                Prefs.setCachedUser(appContext, null)
+                false
+            } else offlineResume()
+        } catch (e: Exception) {
+            offlineResume()
+        }
     }
 
-    suspend fun login(username: String, password: String): Result<User> = runCatching {
-        val user = api.login(username, password)
+    private fun offlineResume(): Boolean {
+        val cached = Prefs.cachedUser(appContext)?.let {
+            runCatching { com.videocall.mobile.net.json.decodeFromString<User>(it) }.getOrNull()
+        } ?: return false
+        onSignedIn(cached)
+        return true
+    }
+
+    suspend fun login(username: String, password: String, totpCode: String? = null): Result<User> = runCatching {
+        val user = api.login(username, password, totpCode)
         onSignedIn(user)
         user
     }
@@ -109,31 +146,50 @@ object SessionManager {
     /** Shared by password login, OIDC login and a resumed session. */
     fun onSignedIn(user: User) {
         _me.value = user
+        cacheUser(user)
         user.preferences?.let { com.videocall.mobile.ui.theme.ThemeState.applyServer(appContext, it) }
         ws.connect()
         ConnectionService.start(appContext)
+        UnreadPollJob.schedule(appContext)
         com.videocall.mobile.chat.ChatRepository.onSignedIn()
+    }
+
+    private fun cacheUser(user: User) {
+        if (::appContext.isInitialized) runCatching {
+            Prefs.setCachedUser(appContext, com.videocall.mobile.net.json.encodeToString(User.serializer(), user.copy(status = "offline")))
+        }
+    }
+
+    /** Signs out on this device with one of the standard explanations (a key of [logoutMessages]). */
+    fun signOutWithReason(reason: String) {
+        logoutReason = logoutMessages[reason]
+        logoutLocal()
     }
 
     fun logoutLocal() {
         if (_me.value == null && !ws.connected) return
+        if (::appContext.isInitialized) Prefs.setCachedUser(appContext, null)
         _me.value = null
         ws.disconnect()
-        if (::appContext.isInitialized) ConnectionService.stop(appContext)
+        if (::appContext.isInitialized) { ConnectionService.stop(appContext); UnreadPollJob.cancel(appContext) }
         com.videocall.mobile.call.CallRepository.hangup()
         com.videocall.mobile.chat.ChatRepository.clear()
         com.videocall.mobile.chat.Crypto.clearOnLogout()
         _presence.value = emptyMap()
+        _users.value = emptyList()
     }
 
     suspend fun logout() {
         runCatching { api.logout() }
         logoutLocal()
+        logoutReason = null // a deliberate sign-out needs no explanation
     }
 
     fun setMe(user: User) {
         // PATCH /api/users/me also returns preferences; keep the previous ones if absent.
-        _me.value = if (user.preferences == null) user.copy(preferences = _me.value?.preferences) else user
+        val merged = if (user.preferences == null) user.copy(preferences = _me.value?.preferences) else user
+        _me.value = merged
+        cacheUser(merged)
     }
 
     fun setMyStatus(status: String) {
@@ -161,6 +217,7 @@ object SessionManager {
             val status = data.str("status") ?: return@on
             _presence.value = _presence.value.toMutableMap().apply { put(id, status) }
         }
+        ws.on("directory:changed") { _directoryVersion.value += 1; refreshUsers() }
         ws.on("force:logout") { data ->
             logoutReason = logoutMessages[data.str("reason")] ?: "You were signed out. Please sign in again."
             logoutLocal()
@@ -174,6 +231,6 @@ object SessionManager {
         // Re-assert our last chosen status on (re)connect — must NOT hardcode
         // "online" here, or a user-set DND silently gets cleared on every
         // automatic reconnect (network blip, app foreground/background).
-        ws.on("ws:open") { ws.send("presence:update", mapOf("status" to _myStatus.value)) }
+        ws.on("ws:open") { ws.send("presence:update", mapOf("status" to _myStatus.value)); refreshUsers() }
     }
 }

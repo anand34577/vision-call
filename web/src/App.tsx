@@ -11,6 +11,7 @@ import { ensureDeviceRegistered } from "./lib/crypto";
 import Login from "./pages/Login";
 import ResetPassword from "./pages/ResetPassword";
 import Shell from "./pages/Shell";
+import ForcePasswordChange from "./components/ForcePasswordChange";
 import CallOverlay from "./components/CallOverlay";
 import IncomingCallModal from "./components/IncomingCallModal";
 import RoomJoinRequests from "./components/RoomJoinRequests";
@@ -61,6 +62,7 @@ export default function App() {
       deleted: "Your account has been removed by an administrator.",
       password_changed: "Your password was changed. Please sign in with the new password.",
       signed_out: "An administrator signed you out. Please sign in again.",
+      signed_out_remotely: "This device was signed out from another device.",
     };
     const onForceLogout = (data: { reason?: string }) => {
       forceSignOut(reasons[data?.reason ?? ""] ?? "You were signed out. Please sign in again.");
@@ -71,6 +73,8 @@ export default function App() {
     useDirectory.getState().fetchUsers();
     useChats.getState().registerWs();
     useChats.getState().fetchGroups();
+    void useChats.getState().fetchConvoPrefs();
+    void useChats.getState().fetchBlocked();
     void useChats.getState().fetchRecent();
     useCalls.getState().registerWs();
     useCalls.getState().fetchHistory();
@@ -81,6 +85,7 @@ export default function App() {
     const offOpen = ws.on("ws:open", () => {
       useDirectory.getState().fetchUsers();
       useChats.getState().fetchGroups();
+      void useChats.getState().fetchConvoPrefs();
       void useChats.getState().fetchRecent();
       useCalls.getState().fetchHistory();
     });
@@ -137,6 +142,7 @@ export default function App() {
     location.hostname !== "127.0.0.1";
 
   if (!me) return <Login />;
+  if (me.must_change_password) return <ForcePasswordChange />;
 
   return (
     <>

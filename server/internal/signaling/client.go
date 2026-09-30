@@ -243,6 +243,10 @@ func (c *Client) route(env *Envelope) {
 		c.handleMessageReact(env)
 	case "message:pin":
 		c.handleMessagePin(env)
+	case "poll:vote":
+		c.handlePollVote(env)
+	case "poll:close":
+		c.handlePollClose(env)
 	case "message:typing":
 		c.handleTyping(env)
 	case "message:read":

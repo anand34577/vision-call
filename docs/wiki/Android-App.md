@@ -50,4 +50,7 @@ sha256sum -c visioncall_v1.0.1_android.apk.sha256
 | Full-screen notifications | Show an incoming call on the lock screen |
 | Nearby devices | Use Bluetooth headsets during calls |
 | Ignore battery optimisation | Stay connected in the background so calls and messages arrive on time |
+| Restart after reboot | The app reconnects by itself after the phone restarts or the app updates |
+
+Vision Call does not use Google's push service (FCM) or any other outside service, so it works the same on a closed network and on the internet. To stay reachable it keeps a connection to your server open in the background. If your phone's battery manager stops it anyway, the app also checks the server about every 15 minutes and shows an "unread messages" notification. Allowing the app to ignore battery optimisation is what keeps calls ringing instantly.
 | Screen recording (only when you share) | Share your screen in a call |

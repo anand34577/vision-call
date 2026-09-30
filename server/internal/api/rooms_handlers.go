@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -37,6 +38,7 @@ type roomInfo struct {
 	RequireApproval bool          `json:"require_approval"`
 	IsOwner         bool          `json:"is_owner"`
 	CreatedAt       string        `json:"created_at"`
+	ScheduledAt     string        `json:"scheduled_at"`
 }
 
 func (a *API) roomInfoOf(room *db.PrivateRoom, viewerID int64) roomInfo {
@@ -47,6 +49,7 @@ func (a *API) roomInfoOf(room *db.PrivateRoom, viewerID int64) roomInfo {
 		RequireApproval: room.RequireApproval,
 		IsOwner:         room.OwnerID == viewerID,
 		CreatedAt:       room.CreatedAt,
+		ScheduledAt:     room.ScheduledAt,
 	}
 	if owner, err := a.db.GetUserByID(room.OwnerID); err == nil {
 		b := briefOf(owner)
@@ -67,6 +70,8 @@ type createRoomRequest struct {
 	Passcode        string  `json:"passcode"`
 	RequireApproval bool    `json:"require_approval"`
 	InvitedUserIDs  []int64 `json:"invited_user_ids"`
+	// ScheduledAt (RFC3339) turns the room into a scheduled meeting; empty = start now.
+	ScheduledAt string `json:"scheduled_at"`
 }
 
 func (a *API) handleCreateRoom(w http.ResponseWriter, r *http.Request) {
@@ -99,6 +104,16 @@ func (a *API) handleCreateRoom(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	scheduledAt := ""
+	if s := strings.TrimSpace(req.ScheduledAt); s != "" {
+		t, err := time.Parse(time.RFC3339, s)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, "scheduled time must be a valid date and time")
+			return
+		}
+		scheduledAt = t.UTC().Format(time.RFC3339)
+	}
+
 	var passcodeHash *string
 	if strings.TrimSpace(req.Passcode) != "" {
 		hash, err := auth.HashPassword(req.Passcode)
@@ -128,7 +143,7 @@ func (a *API) handleCreateRoom(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := a.db.CreatePrivateRoom(id, req.Name, me.ID, passcodeHash, req.RequireApproval, req.InvitedUserIDs); err != nil {
+	if err := a.db.CreatePrivateRoom(id, req.Name, me.ID, passcodeHash, req.RequireApproval, req.InvitedUserIDs, scheduledAt); err != nil {
 		writeErr(w, http.StatusInternalServerError, "could not create room")
 		return
 	}

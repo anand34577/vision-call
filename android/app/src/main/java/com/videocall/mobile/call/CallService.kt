@@ -67,7 +67,7 @@ class CallService : Service() {
     private fun baseType(): Int {
         val hasCamera = ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) ==
             PackageManager.PERMISSION_GRANTED
-        var type = ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE or ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+        var type = ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
         if (hasCamera) type = type or ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
         return type
     }

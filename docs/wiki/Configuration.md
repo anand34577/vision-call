@@ -74,7 +74,9 @@ The default block list is `.exe .bat .cmd .com .scr .msi .msp .ps1 .psm1 .vbs .v
 
 | Setting | Default | What it does |
 |---|---|---|
-| `SESSION_TTL_HOURS` | `12` | How long a sign-in lasts. |
+| `SESSION_TTL_HOURS` | `720` | How long a device stays signed in **without being used**. The timer restarts on use, so people who use the app regularly stay signed in. |
+| `MESSAGE_RETENTION_DAYS` | `0` | Permanently delete chat messages older than this many days (pinned messages are kept). `0` keeps everything. Runs once a day. |
+| `METRICS_TOKEN` | empty | If set, `/metrics` needs `Authorization: Bearer <token>`. If empty, only the server itself and private networks can read it. |
 | `LOG_LEVEL` | `info` | `debug`, `info`, `warn` or `error`. |
 
 ### Password reset by email (live)

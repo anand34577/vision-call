@@ -1,22 +1,23 @@
 import React, { FormEvent, useEffect, useMemo, useRef, useState } from "react";
-import { HardDrive, PhoneCall, RefreshCw, UserPlus, Users, Activity, Search, Eye, EyeOff, Trash2, AlertTriangle, Loader2, ScrollText, Settings as SettingsIcon, Lock, RotateCcw, PhoneCall as CallIcon, FolderCog, Mail, KeyRound, ShieldCheck, Network, Server, Pencil, Ban, UserCheck, LogOut, Copy, Wand2, Archive } from "lucide-react";
+import { Hash, HardDrive, PhoneCall, RefreshCw, UserPlus, Users, Activity, Search, Eye, EyeOff, Trash2, AlertTriangle, Loader2, ScrollText, Settings as SettingsIcon, Lock, RotateCcw, PhoneCall as CallIcon, FolderCog, Mail, KeyRound, ShieldCheck, Network, Server, Pencil, Ban, UserCheck, LogOut, Copy, Wand2, Archive } from "lucide-react";
 import { api } from "../lib/api";
 import { useDirectory } from "../store/directory";
 import { useAuth } from "../store/auth";
+import AdminGroups from "./AdminGroups";
 import { Alert, Avatar, Modal, PresenceDot, Switch, Tabs, SkeletonList, EmptyState, btnDestructive, btnGhost, btnPrimary, btnSecondary, inputCls } from "../components/ui";
 import { fmtBytes, presenceLabel } from "../lib/util";
 import type { AdminStats, AuditEntry, SettingView, User } from "../lib/types";
 import { toast } from "../store/toast";
 import AdminBackups from "./AdminBackups";
 
-type AdminTab = "users" | "audit" | "settings" | "backups";
+type AdminTab = "users" | "groups" | "audit" | "settings" | "backups";
 
 // Admin's active tab lives at "#admin/<tab>" (bare "#admin" = users) so a
 // reload lands back on the same tab instead of always resetting to Users.
 function parseAdminTab(): AdminTab {
   const hash = window.location.hash.replace("#", "");
   const sub = hash.startsWith("admin/") ? hash.slice("admin/".length) : "";
-  return sub === "audit" || sub === "settings" || sub === "backups" ? sub : "users";
+  return sub === "groups" || sub === "audit" || sub === "settings" || sub === "backups" ? sub : "users";
 }
 
 const GROUP_ICON: Record<string, typeof Users> = {
@@ -664,6 +665,7 @@ export default function Admin() {
           onChange={(id) => setTab(id as AdminTab)}
           tabs={[
             { key: "users", label: "Users", icon: <Users className="h-4 w-4" /> },
+            { key: "groups", label: "Groups", icon: <Hash className="h-4 w-4" /> },
             { key: "audit", label: "Audit Log", icon: <ScrollText className="h-4 w-4" /> },
             { key: "settings", label: "Server Settings", icon: <SettingsIcon className="h-4 w-4" /> },
             { key: "backups", label: "Backups", icon: <Archive className="h-4 w-4" /> },
@@ -804,6 +806,7 @@ export default function Admin() {
           </div>
         )}
 
+        {tab === "groups" && <AdminGroups />}
         {tab === "audit" && <AuditLog />}
 
         {tab === "settings" && <ServerSettings />}

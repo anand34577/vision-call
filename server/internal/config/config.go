@@ -36,6 +36,8 @@ type Config struct {
 	DatabaseURL            string // postgres://... or mysql://...; empty = sqlite in DataDir (default)
 	JWTSecret              []byte
 	SessionTTLHours        int
+	MessageRetentionDays   int
+	MetricsToken           string
 	BootstrapAdminUser     string
 	BootstrapAdminPassword string // optional; generated + printed when empty and no users exist
 	ExternalIP             string // LAN/VPN IP the SFU advertises in ICE candidates
@@ -200,7 +202,9 @@ func Load() *Config {
 		TLSKey:                env("TLS_KEY", ""),
 		DataDir:               env("DATA_DIR", "./data"),
 		DatabaseURL:           env("DATABASE_URL", ""),
-		SessionTTLHours:       envInt("SESSION_TTL_HOURS", 12),
+		SessionTTLHours:       envInt("SESSION_TTL_HOURS", 720),
+		MessageRetentionDays:  envInt("MESSAGE_RETENTION_DAYS", 0),
+		MetricsToken:          os.Getenv("METRICS_TOKEN"),
 		BootstrapAdminUser:    env("BOOTSTRAP_ADMIN_USER", "admin"),
 		ExternalIP:            env("EXTERNAL_IP", ""),
 		TurnHost:              env("TURN_HOST", ""),

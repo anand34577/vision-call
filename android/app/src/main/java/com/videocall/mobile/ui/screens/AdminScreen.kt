@@ -42,7 +42,7 @@ import com.videocall.mobile.ui.components.ConfirmDialog
 import com.videocall.mobile.ui.components.EmptyState
 import com.videocall.mobile.ui.components.SectionCard
 
-private enum class AdminTab { USERS, SETTINGS, AUDIT }
+private enum class AdminTab { USERS, GROUPS, SETTINGS, AUDIT }
 
 /** Full admin console: server stats + user CRUD, live settings editor, audit log. */
 @Composable
@@ -61,6 +61,7 @@ fun AdminScreen(onBack: () -> Unit) {
                 )
                 TabRow(selectedTabIndex = tab.ordinal) {
                     Tab(selected = tab == AdminTab.USERS, onClick = { tab = AdminTab.USERS }, text = { Text("Users") })
+                    Tab(selected = tab == AdminTab.GROUPS, onClick = { tab = AdminTab.GROUPS }, text = { Text("Groups") })
                     Tab(selected = tab == AdminTab.SETTINGS, onClick = { tab = AdminTab.SETTINGS }, text = { Text("Settings") })
                     Tab(selected = tab == AdminTab.AUDIT, onClick = { tab = AdminTab.AUDIT }, text = { Text("Audit log") })
                 }
@@ -71,6 +72,7 @@ fun AdminScreen(onBack: () -> Unit) {
         Box(Modifier.padding(padding)) {
             when (tab) {
                 AdminTab.USERS -> AdminUsersTab(showError)
+                AdminTab.GROUPS -> AdminGroupsTab(showError)
                 AdminTab.SETTINGS -> AdminSettingsTab(showError)
                 AdminTab.AUDIT -> AdminAuditTab()
             }

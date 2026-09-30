@@ -379,6 +379,7 @@ func runPeriodicCleanup(dbh *db.DB, apiHandler *api.API, lg *slog.Logger, stop <
 				lg.Warn("periodic cleanup: expire old password reset tokens", "err", err)
 			}
 			apiHandler.CleanupOrphanFiles()
+			apiHandler.PurgeOldMessages()
 		case <-stop:
 			return
 		}

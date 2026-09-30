@@ -96,8 +96,9 @@ func (c *Client) handleCallInvite(env *Envelope) {
 	}
 	c.hub.callStateMu.Lock()
 	defer c.hub.callStateMu.Unlock()
+	c.hub.promote(c)
 	callee, err := c.hub.db.GetUserByID(p.CalleeID)
-	if err != nil || callee.Disabled {
+	if err != nil || callee.Disabled || c.hub.db.IsBlockedEitherWay(c.user.ID, callee.ID) {
 		c.Send("call:ended", map[string]any{"call_id": p.CallID, "reason": "unavailable"})
 		return
 	}
@@ -199,6 +200,9 @@ func (c *Client) handleCallAccept(env *Envelope) {
 		c.Send("call:ended", map[string]any{"call_id": p.CallID, "reason": "unavailable"})
 		return
 	}
+	// This device takes the call; stop the others from ringing.
+	c.hub.promote(c)
+	c.hub.sendToOthers(c, "call:ended", map[string]any{"call_id": p.CallID, "reason": "answered-elsewhere"})
 	if err := m.hub.db.AddCallParticipant(call.dbID, c.user.ID, true); err != nil {
 		ended, endedOK := m.end(call.id, "active")
 		if endedOK {
@@ -411,7 +415,9 @@ func (c *Client) handleCallResume(env *Envelope) {
 	}
 	if !c.hub.p2p.resume(c.user.ID, p.CallID) {
 		c.Send("call:ended", map[string]any{"call_id": p.CallID, "reason": "hangup"})
+		return
 	}
+	c.hub.promote(c)
 }
 
 func (m *p2pManager) onDisconnect(uid int64) {

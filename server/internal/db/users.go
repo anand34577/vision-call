@@ -23,8 +23,15 @@ type User struct {
 	Disabled     bool    `json:"disabled"`
 	// Deleted accounts were removed by an admin but still appear as
 	// "Deleted user" in other people's history. They can't be re-enabled.
-	Deleted     bool    `json:"deleted"`
-	CreatedAt   string  `json:"created_at"`
+	Deleted   bool   `json:"deleted"`
+	CreatedAt string `json:"created_at"`
+	// StatusText is a short free-text "what I'm up to" line.
+	StatusText string `json:"status_text"`
+	// MustChangePassword forces a new password at next sign-in (set when an
+	// admin creates the account or sets its password).
+	MustChangePassword bool `json:"must_change_password"`
+	// TOTPSecret is the base32 authenticator secret; empty means 2FA is off.
+	TOTPSecret  string  `json:"-"`
 	OIDCIssuer  *string `json:"-"`
 	OIDCSubject *string `json:"-"`
 	// Status is filled at runtime from the presence hub, not stored here.
@@ -42,8 +49,9 @@ func (u *User) MarshalJSON() ([]byte, error) {
 	type alias User
 	return json.Marshal(struct {
 		*alias
-		OIDCLinked bool `json:"oidc_linked"`
-	}{alias: (*alias)(u), OIDCLinked: u.OIDCLinked()})
+		OIDCLinked  bool `json:"oidc_linked"`
+		TOTPEnabled bool `json:"totp_enabled"`
+	}{alias: (*alias)(u), OIDCLinked: u.OIDCLinked(), TOTPEnabled: u.TOTPSecret != ""})
 }
 
 // UserBrief is the trimmed user shape embedded in messages and call records.
@@ -56,14 +64,14 @@ type UserBrief struct {
 
 var ErrNotFound = errors.New("not found")
 
-const userCols = `id, username, display_name, password_hash, role, avatar_file_id, email, disabled, deleted, created_at, oidc_issuer, oidc_subject`
+const userCols = `id, username, display_name, password_hash, role, avatar_file_id, email, disabled, deleted, created_at, oidc_issuer, oidc_subject, status_text, must_change_password, totp_secret`
 
 func scanUser(row interface{ Scan(...any) error }) (*User, error) {
 	u := &User{}
 	var avatar sql.NullInt64
 	var email, oidcIssuer, oidcSubject sql.NullString
-	var disabled, deleted int
-	if err := row.Scan(&u.ID, &u.Username, &u.DisplayName, &u.PasswordHash, &u.Role, &avatar, &email, &disabled, &deleted, &u.CreatedAt, &oidcIssuer, &oidcSubject); err != nil {
+	var disabled, deleted, mustChange int
+	if err := row.Scan(&u.ID, &u.Username, &u.DisplayName, &u.PasswordHash, &u.Role, &avatar, &email, &disabled, &deleted, &u.CreatedAt, &oidcIssuer, &oidcSubject, &u.StatusText, &mustChange, &u.TOTPSecret); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
 		}
@@ -78,6 +86,7 @@ func scanUser(row interface{ Scan(...any) error }) (*User, error) {
 	u.OIDCSubject = nullStringPtr(oidcSubject)
 	u.Disabled = disabled != 0
 	u.Deleted = deleted != 0
+	u.MustChangePassword = mustChange != 0
 	return u, nil
 }
 
@@ -275,8 +284,31 @@ func (d *DB) updateUser(id int64, displayName *string, role *string, disabled *b
 	return tx.Commit()
 }
 
+// SetUserPassword stores a password the user chose themselves, which also
+// satisfies a pending "must change password" requirement.
 func (d *DB) SetUserPassword(id int64, hash string) error {
-	_, err := d.Exec(`UPDATE users SET password_hash = ? WHERE id = ?`, hash, id)
+	_, err := d.Exec(`UPDATE users SET password_hash = ?, must_change_password = 0 WHERE id = ?`, hash, id)
+	return err
+}
+
+// SetMustChangePassword flags (or clears) the forced password change.
+func (d *DB) SetMustChangePassword(id int64, on bool) error {
+	v := 0
+	if on {
+		v = 1
+	}
+	_, err := d.Exec(`UPDATE users SET must_change_password = ? WHERE id = ?`, v, id)
+	return err
+}
+
+func (d *DB) SetStatusText(id int64, text string) error {
+	_, err := d.Exec(`UPDATE users SET status_text = ? WHERE id = ?`, text, id)
+	return err
+}
+
+// SetTOTPSecret stores the authenticator secret ("" turns 2FA off).
+func (d *DB) SetTOTPSecret(id int64, secret string) error {
+	_, err := d.Exec(`UPDATE users SET totp_secret = ? WHERE id = ?`, secret, id)
 	return err
 }
 
@@ -378,9 +410,62 @@ func (d *DB) PurgeUser(id int64) error {
 
 // ---- sessions ----
 
-func (d *DB) CreateSession(sessionID string, userID int64, tokenHash string, expires time.Time) error {
-	_, err := d.Exec(`INSERT INTO sessions (id, user_id, token_hash, created_at, expires_at) VALUES (?, ?, ?, ?, ?)`,
-		sessionID, userID, tokenHash, now(), expires.UTC().Format(time.RFC3339))
+func (d *DB) CreateSession(sessionID string, userID int64, tokenHash string, expires time.Time, userAgent, ip string) error {
+	if len(userAgent) > 255 {
+		userAgent = userAgent[:255]
+	}
+	_, err := d.Exec(`INSERT INTO sessions (id, user_id, token_hash, created_at, expires_at, user_agent, ip, last_seen) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		sessionID, userID, tokenHash, now(), expires.UTC().Format(time.RFC3339), userAgent, ip, now())
+	return err
+}
+
+// ExtendSession slides a session's expiry forward (sliding inactivity timeout).
+func (d *DB) ExtendSession(sessionID string, expires time.Time) error {
+	_, err := d.Exec(`UPDATE sessions SET expires_at = ?, last_seen = ? WHERE id = ?`,
+		expires.UTC().Format(time.RFC3339), now(), sessionID)
+	return err
+}
+
+// SessionInfo describes one signed-in device for the "devices" list.
+type SessionInfo struct {
+	ID        string `json:"id"`
+	UserAgent string `json:"user_agent"`
+	IP        string `json:"ip"`
+	CreatedAt string `json:"created_at"`
+	LastSeen  string `json:"last_seen"`
+	Current   bool   `json:"current"`
+}
+
+func (d *DB) ListSessions(userID int64) ([]SessionInfo, error) {
+	rows, err := d.Query(`SELECT id, user_agent, ip, created_at, last_seen FROM sessions WHERE user_id = ? AND expires_at >= ? ORDER BY created_at DESC`, userID, now())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []SessionInfo{}
+	for rows.Next() {
+		var s SessionInfo
+		if err := rows.Scan(&s.ID, &s.UserAgent, &s.IP, &s.CreatedAt, &s.LastSeen); err != nil {
+			return nil, err
+		}
+		out = append(out, s)
+	}
+	return out, rows.Err()
+}
+
+// DeleteSessionOf removes one session, but only if it belongs to userID.
+func (d *DB) DeleteSessionOf(userID int64, sessionID string) (bool, error) {
+	res, err := d.Exec(`DELETE FROM sessions WHERE id = ? AND user_id = ?`, sessionID, userID)
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	return n > 0, nil
+}
+
+// DeleteOtherSessions signs a user out everywhere except keepID.
+func (d *DB) DeleteOtherSessions(userID int64, keepID string) error {
+	_, err := d.Exec(`DELETE FROM sessions WHERE user_id = ? AND id <> ?`, userID, keepID)
 	return err
 }
 

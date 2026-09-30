@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -31,8 +32,13 @@ type Hub struct {
 	log      *slog.Logger
 	settings *settings.Store
 
-	mu      sync.RWMutex
+	mu sync.RWMutex
+	// clients holds each user's primary connection: the one calls and
+	// conference signaling go to. extras holds their other signed-in devices
+	// (phone + laptop at once); chat traffic fans out to all of them, and
+	// call-related actions promote the acting device to primary.
 	clients map[int64]*Client
+	extras  map[int64][]*Client
 	// active conference roomID -> call DB row id
 	roomCalls       map[string]int64
 	roomLeaveTimers map[int64]*time.Timer
@@ -118,7 +124,7 @@ func (h *Hub) HandleWS(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
-	user, err := auth.ValidateSession(h.db, h.cfg.JWTSecret, cookie.Value)
+	user, err := auth.ValidateSession(h.db, h.cfg.JWTSecret, cookie.Value, time.Duration(h.settings.Get().SessionTTLHours)*time.Hour)
 	if err != nil {
 		h.log.Warn("ws: invalid session", "ip", realIP(r, h.settings.Get().TrustProxy), "err", err)
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
@@ -163,74 +169,178 @@ func realIP(r *http.Request, trustProxy bool) string { return auth.RealIP(r, tru
 func (h *Hub) register(c *Client) {
 	h.callStateMu.Lock()
 	h.mu.Lock()
-	old := h.clients[c.user.ID]
-	if old != nil {
-		// A fresh session replaces the old one. Keep an SFU participant
-		// alive briefly so a reconnect can resume, but end P2P calls because
-		// their signaling state cannot be resumed safely.
-		h.scheduleRoomLeaveLocked(c.user.ID)
+	uid := c.user.ID
+	if h.extras == nil {
+		h.extras = map[int64][]*Client{}
 	}
-	h.clients[c.user.ID] = c
+	old := h.clients[uid]
+	var replaced *Client // same-device connection this one supersedes
+	switch {
+	case old == nil:
+		h.clients[uid] = c
+	case sameDevice(old, c):
+		replaced = old
+		h.clients[uid] = c
+		// Keep an SFU participant alive briefly so a reconnect can resume.
+		h.scheduleRoomLeaveLocked(uid)
+	default:
+		// A different device signed in: it stays connected alongside the
+		// first one instead of signing it out. Only its own earlier socket
+		// (same device id, e.g. a refresh) is superseded.
+		list := h.extras[uid]
+		placed := false
+		for i, e := range list {
+			if sameDevice(e, c) {
+				replaced = e
+				list[i] = c
+				placed = true
+				break
+			}
+		}
+		if !placed {
+			h.extras[uid] = append(list, c)
+		}
+	}
 	h.mu.Unlock()
-	if old != nil {
-		sameDevice := old.deviceID != "" && old.deviceID == c.deviceID
-		if sameDevice {
-			// Same browser, but not necessarily the same tab: a plain tab
-			// refresh looks identical here to "a second tab of this account
-			// is now open", and a silent close used to make the replaced tab
-			// immediately auto-reconnect - which this same branch would then
-			// silently close again, forever (this was the actual cause of
-			// "Realtime connection lost" firing repeatedly with more than one
-			// tab open). ws:replaced tells that tab's client to stop
-			// reconnecting on its own instead of fighting over the slot.
-			h.log.Debug("ws: replacing existing session (same device)", "user_id", c.user.ID)
-			old.Finish("ws:replaced", nil)
+	if replaced != nil {
+		// ws:replaced tells that tab's client to stop reconnecting on its own
+		// instead of fighting over the slot with this one.
+		h.log.Debug("ws: replacing existing connection (same device)", "user_id", uid)
+		replaced.Finish("ws:replaced", nil)
+		if replaced == old {
 			// Most likely the same tab reconnecting: a 1:1 call survives if the
 			// client sends call:resume within the grace period.
-			h.p2p.scheduleDisconnect(c.user.ID)
-		} else {
-			// A different device/browser signed in to this account. Only one
-			// session is active at a time, so tell the old one clearly instead
-			// of silently dropping it (which would otherwise just make it
-			// auto-reconnect and re-kick the new session in a loop).
-			h.log.Info("ws: session replaced by another device", "user_id", c.user.ID)
-			// Revoke the old session too, not just its socket - otherwise its
-			// reload (see App.tsx's forceSignOut) silently re-authenticates
-			// with the still-valid token and re-kicks this new session,
-			// fighting forever.
-			if old.sessionID != "" {
-				_ = h.db.DeleteSession(old.sessionID)
-			}
-			old.Kick("signed_in_elsewhere")
-			h.p2p.onDisconnect(c.user.ID) // the call lived on the other device
+			h.p2p.scheduleDisconnect(uid)
 		}
 	}
 	h.callStateMu.Unlock()
 	h.onConnect(c)
 }
 
+func sameDevice(a, b *Client) bool { return a.deviceID != "" && a.deviceID == b.deviceID }
+
+// promote makes c the user's primary connection (the target of call and
+// conference signaling), demoting the previous primary to an extra device.
+func (h *Hub) promote(c *Client) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	uid := c.user.ID
+	cur := h.clients[uid]
+	if cur == c || cur == nil {
+		return
+	}
+	list := h.extras[uid][:0:0]
+	for _, e := range h.extras[uid] {
+		if e != c {
+			list = append(list, e)
+		}
+	}
+	h.extras[uid] = append(list, cur)
+	h.clients[uid] = c
+}
+
+// allConns returns every live connection of a user, primary first.
+func (h *Hub) allConns(userID int64) []*Client {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.allConnsLocked(userID)
+}
+
+func (h *Hub) allConnsLocked(userID int64) []*Client {
+	p := h.clients[userID]
+	if p == nil {
+		return nil
+	}
+	out := make([]*Client, 0, 1+len(h.extras[userID]))
+	out = append(out, p)
+	return append(out, h.extras[userID]...)
+}
+
+// sendToOthers delivers to the user's other devices, not c itself.
+func (h *Hub) sendToOthers(c *Client, typ string, data any) {
+	for _, o := range h.allConns(c.user.ID) {
+		if o != c {
+			o.Send(typ, data)
+		}
+	}
+}
+
+// fansOut reports whether a message type goes to every device of a user
+// (chat, group and ring events) rather than only the primary connection
+// (WebRTC/SFU signaling, which belongs to exactly one device).
+func fansOut(typ string) bool {
+	if strings.HasPrefix(typ, "message:") || strings.HasPrefix(typ, "group:") || strings.HasPrefix(typ, "poll:") || typ == "blocks:changed" {
+		return true
+	}
+	switch typ {
+	case "call:invite", "call:ended", "room:invite", "account:updated", "conversation:prefs":
+		return true
+	}
+	return false
+}
+
+// KickSession signs out just the connections that belong to one session.
+func (h *Hub) KickSession(userID int64, sessionID, reason string) {
+	for _, c := range h.allConns(userID) {
+		if c.sessionID == sessionID {
+			c.Kick(reason)
+		}
+	}
+}
+
+// KickOtherSessions signs out every connection except those of keepSessionID.
+func (h *Hub) KickOtherSessions(userID int64, keepSessionID, reason string) {
+	for _, c := range h.allConns(userID) {
+		if c.sessionID != keepSessionID {
+			c.Kick(reason)
+		}
+	}
+}
+
 func (h *Hub) unregister(c *Client) {
 	h.callStateMu.Lock()
 	defer h.callStateMu.Unlock()
 	h.mu.Lock()
-	current := h.clients[c.user.ID]
-	if current == c {
-		delete(h.clients, c.user.ID)
-		if h.closed.Load() {
-			h.mu.Unlock()
-			return
+	uid := c.user.ID
+	if h.clients[uid] != c {
+		// An extra device (or a connection that was already replaced).
+		list := h.extras[uid]
+		for i, e := range list {
+			if e == c {
+				h.extras[uid] = append(list[:i:i], list[i+1:]...)
+				break
+			}
 		}
-		h.scheduleRoomLeaveLocked(c.user.ID)
-	}
-	h.mu.Unlock()
-	if current != c {
-		// We were replaced by a newer session; nothing to tear down.
+		if len(h.extras[uid]) == 0 {
+			delete(h.extras, uid)
+		}
+		h.mu.Unlock()
 		return
 	}
+	delete(h.clients, uid)
+	promoted := false
+	if list := h.extras[uid]; len(list) > 0 {
+		h.clients[uid] = list[len(list)-1]
+		if len(list) == 1 {
+			delete(h.extras, uid)
+		} else {
+			h.extras[uid] = list[:len(list)-1]
+		}
+		promoted = true
+	}
+	if h.closed.Load() {
+		h.mu.Unlock()
+		return
+	}
+	h.scheduleRoomLeaveLocked(uid)
+	h.mu.Unlock()
 	c.log.Info("ws: disconnected")
-	h.broadcast("presence:update", map[string]any{"user_id": c.user.ID, "status": "offline"}, nil)
-	h.p2p.scheduleDisconnect(c.user.ID)
-	h.privateRooms.dropUserEverywhere(c.user.ID)
+	if !promoted {
+		h.broadcast("presence:update", map[string]any{"user_id": uid, "status": "offline"}, nil)
+	}
+	// Any call this device was in cannot be carried on by another device.
+	h.p2p.scheduleDisconnect(uid)
+	h.privateRooms.dropUserEverywhere(uid)
 }
 
 const sfuResumeGrace = 15 * time.Second
@@ -291,13 +401,25 @@ func (h *Hub) client(userID int64) *Client {
 	return h.clients[userID]
 }
 
-// sendToUser delivers a message if the user is connected; returns false if offline.
+// sendToUser delivers a message if the user is connected; returns false if
+// offline. Chat and ring events reach every device, signaling only the primary.
 func (h *Hub) sendToUser(userID int64, typ string, data any) bool {
-	c := h.client(userID)
-	if c == nil {
+	conns := h.allConns(userID)
+	if len(conns) == 0 {
 		return false
 	}
-	return c.Send(typ, data)
+	ok := conns[0].Send(typ, data)
+	if fansOut(typ) {
+		for _, c := range conns[1:] {
+			c.Send(typ, data)
+		}
+	}
+	return ok
+}
+
+// SendToUser is the exported form used by the REST API for realtime events.
+func (h *Hub) SendToUser(userID int64, typ string, data any) bool {
+	return h.sendToUser(userID, typ, data)
 }
 
 // DirectoryChanged tells every connected app to reload the people list, so
@@ -322,6 +444,9 @@ func (h *Hub) broadcast(typ string, data any, except *int64) {
 			continue
 		}
 		c.SendRaw(payload)
+		for _, e := range h.extras[id] {
+			e.SendRaw(payload)
+		}
 	}
 }
 
@@ -363,19 +488,32 @@ func (h *Hub) onConnect(c *Client) {
 		c.log.Info("ws: delivered offline messages", "count", len(msgs))
 	}
 
-	counts, err := h.db.UnreadDirectCounts(c.user.ID)
+	counts, groupCounts := h.unreadCounts(c.user.ID)
+	c.Send("message:unread", map[string]any{"counts": counts, "group_counts": groupCounts})
+}
+
+func (h *Hub) unreadCounts(userID int64) (map[int64]int, map[int64]int) {
+	counts, err := h.db.UnreadDirectCounts(userID)
 	if err != nil {
-		h.log.Error("ws: fetch unread direct counts", "user_id", c.user.ID, "err", err)
+		h.log.Error("ws: fetch unread direct counts", "user_id", userID, "err", err)
 		counts = map[int64]int{}
 	}
-	groupCounts, err := h.db.GroupUnreadCounts(c.user.ID)
+	groupCounts, err := h.db.GroupUnreadCounts(userID)
 	if err != nil {
-		h.log.Error("ws: fetch unread group counts", "user_id", c.user.ID, "err", err)
+		h.log.Error("ws: fetch unread group counts", "user_id", userID, "err", err)
 		groupCounts = map[int64]int{}
 	}
-	if len(counts) > 0 || len(groupCounts) > 0 {
-		c.Send("message:unread", map[string]any{"counts": counts, "group_counts": groupCounts})
+	return counts, groupCounts
+}
+
+// syncUnread tells a user's other devices the current unread counts, so
+// reading a chat on the phone clears its badge on the laptop too.
+func (h *Hub) syncUnread(c *Client) {
+	if len(h.allConns(c.user.ID)) < 2 {
+		return
 	}
+	counts, groupCounts := h.unreadCounts(c.user.ID)
+	h.sendToOthers(c, "message:unread", map[string]any{"counts": counts, "group_counts": groupCounts})
 }
 
 func (h *Hub) presenceList() []map[string]any {
@@ -415,7 +553,7 @@ func (h *Hub) ActiveCalls() int {
 func (h *Hub) KickUser(userID int64, reason string) {
 	h.callStateMu.Lock()
 	defer h.callStateMu.Unlock()
-	if c := h.client(userID); c != nil {
+	for _, c := range h.allConns(userID) {
 		c.log.Info("ws: user signed out by the server", "reason", reason)
 		c.Kick(reason)
 	}
@@ -463,10 +601,12 @@ func (h *Hub) Close() {
 	h.callStateMu.Lock()
 	h.mu.Lock()
 	clients := make([]*Client, 0, len(h.clients))
-	for _, c := range h.clients {
+	for id, c := range h.clients {
 		clients = append(clients, c)
+		clients = append(clients, h.extras[id]...)
 	}
 	h.clients = map[int64]*Client{}
+	h.extras = map[int64][]*Client{}
 	for userID, timer := range h.roomLeaveTimers {
 		timer.Stop()
 		delete(h.roomLeaveTimers, userID)

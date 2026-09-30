@@ -13,6 +13,8 @@ object Prefs {
     private const val KEY_DEVICE = "device_id"
     private const val KEY_THEME = "theme_mode"
     private const val KEY_STATUS = "my_status"
+    private const val KEY_USER = "cached_user"
+    private const val KEY_POLLED = "last_polled_unread"
 
     private fun prefs(ctx: Context) = ctx.applicationContext.getSharedPreferences(FILE, Context.MODE_PRIVATE)
 
@@ -34,6 +36,16 @@ object Prefs {
         }
         return id
     }
+
+    /** The signed-in user as last seen online, so the app can open offline instead of asking for a password. */
+    fun cachedUser(ctx: Context): String? = prefs(ctx).getString(KEY_USER, null)
+
+    fun setCachedUser(ctx: Context, json: String?) {
+        prefs(ctx).edit().apply { if (json == null) remove(KEY_USER) else putString(KEY_USER, json) }.apply()
+    }
+
+    fun lastPolledUnread(ctx: Context): Int = prefs(ctx).getInt(KEY_POLLED, 0)
+    fun setLastPolledUnread(ctx: Context, n: Int) { prefs(ctx).edit().putInt(KEY_POLLED, n).apply() }
 
     fun clearServer(ctx: Context) {
         prefs(ctx).edit().remove(KEY_SERVER).apply()

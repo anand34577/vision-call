@@ -1,7 +1,12 @@
 import AttachmentPreview from "./AttachmentPreview";
 import React, { ClipboardEvent, DragEvent, KeyboardEvent, useEffect, useRef, useState } from "react";
 import {
+  Archive,
   ArrowLeft,
+  BarChart3,
+  Ban,
+  Bell,
+  BellOff,
   Check,
   CheckCheck,
   File as FileIcon,
@@ -11,6 +16,8 @@ import {
   Forward,
   Lock,
   LockOpen,
+  Mic,
+  MessageSquare,
   MoreVertical,
   Paperclip,
   Pencil,
@@ -22,6 +29,7 @@ import {
   Search,
   Send,
   SmilePlus,
+  Square,
   Star,
   Trash2,
   UserMinus,
@@ -39,6 +47,10 @@ import { api } from "../lib/api";
 import { Avatar, Modal, PresenceDot, btnDestructive, btnGhost, btnPrimary, btnSecondary, inputCls } from "./ui";
 import { fmtBytes, fmtDay, fmtTime, presenceLabel } from "../lib/util";
 import { usersMissingKeys } from "../lib/crypto";
+import { exportChat } from "../lib/exportChat";
+import { PollCard } from "./PollCard";
+import PollComposer from "./PollComposer";
+import ThreadModal from "./ThreadModal";
 import type { Convo, Message } from "../lib/types";
 
 // Note: a fixed quick-reaction bar instead of a full emoji picker —
@@ -140,6 +152,20 @@ function Ticks({ msg }: { msg: Message }) {
   return <Check className="h-4 w-4 text-zinc-400" aria-label="Sent" role="img" />;
 }
 
+// GroupSeen shows who has read one of my group messages (from each member's
+// last-read marker) instead of a single delivered/read tick.
+function GroupSeen({ msg, group, meID, reads }: { msg: Message; group: { members: { id: number; display_name: string }[] }; meID: number; reads?: Record<number, number> }) {
+  const seenBy = group.members.filter((mem) => mem.id !== meID && (reads?.[mem.id] ?? 0) >= msg.id);
+  if (seenBy.length === 0) return <Check className="h-4 w-4 text-zinc-400" aria-label="Sent" role="img" />;
+  const names = seenBy.map((x) => x.display_name).join(", ");
+  return (
+    <span className="inline-flex items-center gap-0.5" title={`Seen by ${names}`}>
+      <CheckCheck className="h-4 w-4 text-sky-500" aria-label={`Seen by ${names}`} role="img" />
+      <span>{seenBy.length}</span>
+    </span>
+  );
+}
+
 // canActOn gates reply/react/edit/delete on a message that's fully landed —
 // not deleted, not still an optimistic/failed local echo (those have no
 // server-assigned id yet, so a reply/reaction would have nothing real to
@@ -169,6 +195,7 @@ function MessageActions({
   onForward,
   onSave,
   saved,
+  onThread,
   showReactionPicker,
   onPickReaction,
   align,
@@ -182,6 +209,7 @@ function MessageActions({
   onForward?: () => void;
   onSave?: () => void;
   saved?: boolean;
+  onThread?: () => void;
   showReactionPicker: boolean;
   onPickReaction: (emoji: string) => void;
   align: "left" | "right";
@@ -205,6 +233,16 @@ function MessageActions({
         >
           <ReplyIcon className="h-4 w-4" />
         </button>
+        {onThread && (
+          <button
+            onClick={onThread}
+            title="Reply in thread"
+            aria-label="Reply in thread"
+            className="h-9 w-9 rounded-full flex items-center justify-center text-zinc-500 dark:text-zinc-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/40"
+          >
+            <MessageSquare className="h-4 w-4" />
+          </button>
+        )}
         {onEdit && (
           <button
             onClick={onEdit}
@@ -353,6 +391,12 @@ export default function ChatPanel({ onBack }: { onBack: () => void }) {
     historyLoading,
     sendError,
     clearSendError,
+    convoPrefs,
+    setConvoPref,
+    groupReads,
+    fetchGroupReads,
+    blocked,
+    setBlocked,
   } = useChats();
   const directoryUsers = useDirectory((s) => s.users);
   const startDmCall = useCalls((s) => s.startDmCall);
@@ -405,7 +449,8 @@ export default function ChatPanel({ onBack }: { onBack: () => void }) {
   const isDM = active?.kind === "dm";
   const peer = useDirectory((s) => (isDM ? s.users.find((u) => u.id === (active as any).peerID) : undefined));
   const group = isDM ? undefined : groups.find((g) => g.id === active?.groupID);
-  const messages = active ? (isDM ? messagesByDm[(active as any).peerID] : messagesByGroup[active!.groupID]) ?? [] : [];
+  // Replies inside a thread live in the thread window, not the main timeline.
+  const messages = (active ? (isDM ? messagesByDm[(active as any).peerID] : messagesByGroup[active!.groupID]) ?? [] : []).filter((m) => !m.thread_root_id);
   const conversationKey = active ? (isDM ? `dm:${(active as any).peerID}` : `g:${active.groupID}`) : "";
   // Note: derived from whatever's already loaded rather than a separate
   // fetch — a pinned message outside the currently-loaded page won't show
@@ -413,6 +458,69 @@ export default function ChatPanel({ onBack }: { onBack: () => void }) {
   // fetch (api.pinnedMessages) if that gap actually bites someone.
   const pinnedMessages = messages.filter((m) => m.pinned_at && !m.deleted_at).sort((a, b) => (b.pinned_at! > a.pinned_at! ? 1 : -1));
   const [showPinned, setShowPinned] = useState(false);
+  const [threadRoot, setThreadRoot] = useState<Message | null>(null);
+  const [showPoll, setShowPoll] = useState(false);
+  const [blockConfirm, setBlockConfirm] = useState(false);
+  const [blockBusy, setBlockBusy] = useState(false);
+  const peerBlocked = isDM && !!peer && blocked.includes(peer.id);
+  const toggleBlock = async () => {
+    if (!peer) return;
+    setBlockBusy(true);
+    try {
+      await setBlocked(peer.id, !peerBlocked);
+      setBlockConfirm(false);
+    } catch (err: any) {
+      setUploadError(err?.message ?? "Could not update block");
+    }
+    setBlockBusy(false);
+  };
+  const groupModerator = !!group && (me.role === "admin" || ["owner", "admin"].includes(group.members.find((x) => x.id === me.id)?.role ?? ""));
+  const convoPref = active ? convoPrefs[conversationKey] : undefined;
+  const muted = !!convoPref?.muted;
+  const archived = !!convoPref?.archived;
+  const groupID = group?.id;
+  useEffect(() => {
+    if (groupID != null) void fetchGroupReads(groupID);
+  }, [groupID, fetchGroupReads]);
+  const prefButtons = active ? (
+    <>
+      <button
+        onClick={() => void setConvoPref(active, { muted: !muted })}
+        title={muted ? "Unmute notifications" : "Mute notifications"}
+        aria-label={muted ? "Unmute notifications" : "Mute notifications"}
+        aria-pressed={muted}
+        className="h-10 w-10 rounded-xl hover:bg-zinc-100 dark:hover:bg-zinc-800/80 flex items-center justify-center text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 transition cursor-pointer"
+      >
+        {muted ? <BellOff className="h-4 w-4 text-amber-500" /> : <Bell className="h-4 w-4" />}
+      </button>
+      <button
+        onClick={() => { void setConvoPref(active, { archived: !archived }); if (!archived) onBack(); }}
+        title={archived ? "Move back to chats" : "Archive chat"}
+        aria-label={archived ? "Unarchive chat" : "Archive chat"}
+        aria-pressed={archived}
+        className="h-10 w-10 rounded-xl hover:bg-zinc-100 dark:hover:bg-zinc-800/80 flex items-center justify-center text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 transition cursor-pointer"
+      >
+        <Archive className={`h-4 w-4 ${archived ? "text-blue-500" : ""}`} />
+      </button>
+    </>
+  ) : null;
+  const [exporting, setExporting] = useState(false);
+  const exportButton = active ? (
+    <button
+      onClick={() => {
+        setExporting(true);
+        exportChat(active, isDM ? (peer?.username ?? "dm") : (group?.name ?? "group"))
+          .catch(() => setUploadError("Could not export this conversation"))
+          .finally(() => setExporting(false));
+      }}
+      disabled={exporting}
+      title="Export conversation (readable text file)"
+      aria-label="Export conversation"
+      className="h-10 w-10 rounded-xl hover:bg-zinc-100 dark:hover:bg-zinc-800/80 flex items-center justify-center text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 transition cursor-pointer"
+    >
+      {exporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+    </button>
+  ) : null;
   const knownUsernames = new Set(directoryUsers.map((u) => u.username.toLowerCase()));
   const encrypted = active ? isEncrypted(active) : false;
 
@@ -509,7 +617,81 @@ export default function ChatPanel({ onBack }: { onBack: () => void }) {
     }
   }, [messages.length]);
 
+  // @mention autocomplete: candidates are the peer or the group's members.
+  const [mention, setMention] = useState<{ q: string; start: number } | null>(null);
+  const [mentionIdx, setMentionIdx] = useState(0);
+  const mentionCandidates = mention
+    ? (isDM ? (peer ? [peer] : []) : (group?.members ?? []))
+        .filter((u) => u.id !== me.id)
+        .filter((u) => u.username.toLowerCase().includes(mention.q.toLowerCase()) || u.display_name.toLowerCase().includes(mention.q.toLowerCase()))
+        .slice(0, 6)
+    : [];
+  const pickMention = (username: string) => {
+    if (!mention) return;
+    const el = textareaRef.current;
+    const caret = el?.selectionStart ?? text.length;
+    const next = `${text.slice(0, mention.start)}@${username} ${text.slice(caret)}`;
+    setText(next);
+    if (conversationKey) saveDraft(conversationKey, next);
+    setMention(null);
+    const pos = mention.start + username.length + 2;
+    requestAnimationFrame(() => { el?.focus(); el?.setSelectionRange(pos, pos); });
+  };
+
+  // Voice messages: record with the microphone, upload as an audio file.
+  const [recording, setRecording] = useState(false);
+  const [recSecs, setRecSecs] = useState(0);
+  const recRef = useRef<{ rec: MediaRecorder; stream: MediaStream; chunks: Blob[]; timer: ReturnType<typeof setInterval>; send: boolean } | null>(null);
+  const canRecord = typeof MediaRecorder !== "undefined" && !!navigator.mediaDevices?.getUserMedia;
+  const startRecording = async () => {
+    if (!canRecord || recRef.current) return;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mime = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4"].find((t) => MediaRecorder.isTypeSupported(t));
+      const rec = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
+      const chunks: Blob[] = [];
+      rec.ondataavailable = (ev) => { if (ev.data.size) chunks.push(ev.data); };
+      const timer = setInterval(() => setRecSecs((n) => n + 1), 1000);
+      recRef.current = { rec, stream, chunks, timer, send: true };
+      rec.onstop = async () => {
+        const cur = recRef.current;
+        recRef.current = null;
+        clearInterval(timer);
+        stream.getTracks().forEach((t) => t.stop());
+        setRecording(false);
+        if (!cur || !cur.send || !cur.chunks.length || !active) return;
+        const type = rec.mimeType || "audio/webm";
+        const file = new File(cur.chunks, `voice-message-${Date.now()}.${type.includes("mp4") ? "m4a" : "webm"}`, { type });
+        setUploading(true);
+        try {
+          const f = await api.uploadFile(file);
+          sendMessage(active, "", f.id, replyTo?.id);
+          setReplyTo(null);
+        } catch (err: any) {
+          setUploadError(err?.message ?? "Could not send voice message");
+        }
+        setUploading(false);
+      };
+      setRecSecs(0);
+      setRecording(true);
+      rec.start();
+    } catch {
+      setUploadError("Microphone unavailable — check the browser's permission.");
+    }
+  };
+  const stopRecording = (send: boolean) => {
+    const cur = recRef.current;
+    if (!cur) return;
+    cur.send = send;
+    cur.rec.stop();
+  };
+  useEffect(() => () => { if (recRef.current) { recRef.current.send = false; recRef.current.rec.stop(); } }, []);
+
   const handleTextChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const caret = e.target.selectionStart ?? e.target.value.length;
+    const m = /(^|\s)@([a-zA-Z0-9._-]{0,32})$/.exec(e.target.value.slice(0, caret));
+    setMention(m ? { q: m[2], start: caret - m[2].length - 1 } : null);
+    setMentionIdx(0);
     setText(e.target.value);
     if (conversationKey) saveDraft(conversationKey, e.target.value);
     e.target.style.height = "auto";
@@ -540,6 +722,20 @@ export default function ChatPanel({ onBack }: { onBack: () => void }) {
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (mention && mentionCandidates.length > 0) {
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        const n = mentionCandidates.length;
+        setMentionIdx((i) => (e.key === "ArrowDown" ? (i + 1) % n : (i + n - 1) % n));
+        return;
+      }
+      if (e.key === "Enter" || e.key === "Tab") {
+        e.preventDefault();
+        pickMention(mentionCandidates[Math.min(mentionIdx, mentionCandidates.length - 1)].username);
+        return;
+      }
+      if (e.key === "Escape") { setMention(null); return; }
+    }
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       send();
@@ -818,7 +1014,7 @@ export default function ChatPanel({ onBack }: { onBack: () => void }) {
             </div>
             <div className="min-w-0 flex-1">
               <p className="font-bold text-sm text-zinc-900 dark:text-zinc-100 truncate tracking-tight">{peer.display_name}</p>
-              <p className="text-xs text-zinc-500 font-medium">{presenceLabel(peer.status)}</p>
+              <p className="text-xs text-zinc-500 font-medium">{presenceLabel(peer.status)}{peer.status_text ? ` · ${peer.status_text}` : ""}</p>
             </div>
             <div className="flex items-center gap-1.5">
               <button
@@ -838,14 +1034,17 @@ export default function ChatPanel({ onBack }: { onBack: () => void }) {
                 <Video className="h-4 w-4" />
                 <span className="hidden sm:inline">Call</span>
               </button>
-              <a
-                href={api.exportUrl({ peerID: peer.id })}
-                title="Export conversation"
-                aria-label="Export conversation"
-                className="h-10 w-10 rounded-xl hover:bg-zinc-100 dark:hover:bg-zinc-800/80 flex items-center justify-center text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 transition"
+              {exportButton}
+              <button
+                onClick={() => (peerBlocked ? void toggleBlock() : setBlockConfirm(true))}
+                title={peerBlocked ? "Unblock this person" : "Block this person"}
+                aria-label={peerBlocked ? "Unblock this person" : "Block this person"}
+                aria-pressed={peerBlocked}
+                className="h-10 w-10 rounded-xl hover:bg-zinc-100 dark:hover:bg-zinc-800/80 flex items-center justify-center text-zinc-500 dark:text-zinc-400 hover:text-rose-600 transition cursor-pointer"
               >
-                <Download className="h-4 w-4" />
-              </a>
+                <Ban className={`h-4 w-4 ${peerBlocked ? "text-rose-500" : ""}`} />
+              </button>
+              {prefButtons}
               <button
                 onClick={() => void toggleEncryption()}
                 disabled={encryptBusy}
@@ -877,6 +1076,8 @@ export default function ChatPanel({ onBack }: { onBack: () => void }) {
                 <Video className="h-4 w-4" />
                 <span className="hidden sm:inline">Call</span>
               </button>
+              {exportButton}
+              {prefButtons}
               <button
                 onClick={() => void toggleEncryption()}
                 disabled={encryptBusy}
@@ -977,6 +1178,7 @@ export default function ChatPanel({ onBack }: { onBack: () => void }) {
                     onForward={m.content && !m.is_encrypted ? () => setForwardingMsg(m) : undefined}
                     onSave={() => void toggleSave(m)}
                     saved={savedIDs.has(m.id)}
+                    onThread={() => setThreadRoot(m)}
                     showReactionPicker={reactionPickerFor === m.id}
                     onPickReaction={(emoji) => { if (emoji) reactToMessage(m, emoji); setReactionPickerFor(null); }}
                     align="right"
@@ -1095,7 +1297,9 @@ export default function ChatPanel({ onBack }: { onBack: () => void }) {
                             <Download className="h-4 w-4 shrink-0 opacity-75" />
                           </a>
                         )}
-                        {m.is_encrypted ? (
+                        {m.poll ? (
+                          <PollCard poll={m.poll} meID={me.id} mine={mine} canClose={mine || me.role === "admin"} />
+                        ) : m.is_encrypted ? (
                           <EncryptedContent m={m} knownUsernames={knownUsernames} myUsername={me.username} />
                         ) : (
                           m.content && <FormattedContent content={m.content} knownUsernames={knownUsernames} myUsername={me.username} />
@@ -1116,7 +1320,7 @@ export default function ChatPanel({ onBack }: { onBack: () => void }) {
                             <>
                               {m.edited_at && <span className="italic opacity-80">edited</span>}
                               {fmtTime(m.sent_at)}
-                              {mine && m.id > 0 && <Ticks msg={m} />}
+                              {mine && m.id > 0 && (group ? <GroupSeen msg={m} group={group} meID={me.id} reads={groupReads[group.id]} /> : <Ticks msg={m} />)}
                             </>
                           )}
                         </div>
@@ -1126,16 +1330,27 @@ export default function ChatPanel({ onBack }: { onBack: () => void }) {
                   {!m.deleted_at && !!m.reactions?.length && (
                     <ReactionPills reactions={m.reactions} meID={me.id} mine={mine} onToggle={(emoji) => reactToMessage(m, emoji)} />
                   )}
+                  {!m.deleted_at && (m.thread_count ?? 0) > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setThreadRoot(m)}
+                      className={`mt-1 flex items-center gap-1 text-xs font-semibold text-blue-500 hover:underline ${mine ? "ml-auto" : ""}`}
+                    >
+                      <MessageSquare className="h-3.5 w-3.5" /> {m.thread_count} {m.thread_count === 1 ? "reply" : "replies"}
+                    </button>
+                  )}
                 </div>
                 {!mine && canActOn(m) && (
                   <MessageActions
                     m={m}
                     onReply={() => { setReplyTo(m); setEditingID(null); }}
+                    onDelete={groupModerator ? () => setDeleteMsgConfirm(m) : undefined}
                     onReact={() => setReactionPickerFor(reactionPickerFor === m.id ? null : m.id)}
                     onPin={canPin(m, me.id, me.role === "admin", group) ? () => pinMessage(m, !m.pinned_at) : undefined}
                     onForward={m.content && !m.is_encrypted ? () => setForwardingMsg(m) : undefined}
                     onSave={() => void toggleSave(m)}
                     saved={savedIDs.has(m.id)}
+                    onThread={() => setThreadRoot(m)}
                     showReactionPicker={reactionPickerFor === m.id}
                     onPickReaction={(emoji) => { if (emoji) reactToMessage(m, emoji); setReactionPickerFor(null); }}
                     align="left"
@@ -1202,6 +1417,12 @@ export default function ChatPanel({ onBack }: { onBack: () => void }) {
           sending={uploading}
           encrypted={encrypted}
         />
+        {peerBlocked ? (
+          <div className="flex items-center justify-between gap-3 rounded-xl bg-zinc-100 dark:bg-zinc-800 px-4 py-3 text-sm">
+            <span>You blocked {peer?.display_name}. They can't message you.</span>
+            <button onClick={() => void toggleBlock()} disabled={blockBusy} className="font-semibold text-blue-500 hover:underline">Unblock</button>
+          </div>
+        ) : (
         <div className="flex items-end gap-2">
           <input
             ref={fileInput}
@@ -1214,6 +1435,14 @@ export default function ChatPanel({ onBack }: { onBack: () => void }) {
             }}
           />
           <button
+            onClick={() => setShowPoll(true)}
+            className="h-10 w-10 rounded-xl hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center justify-center text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 shrink-0 transition cursor-pointer border border-transparent hover:border-zinc-200 dark:hover:border-zinc-700/60"
+            title="Create a poll"
+            aria-label="Create a poll"
+          >
+            <BarChart3 className="h-5 w-5" />
+          </button>
+          <button
             onClick={() => fileInput.current?.click()}
             disabled={uploading}
             className="h-10 w-10 rounded-xl hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center justify-center text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 shrink-0 transition cursor-pointer border border-transparent hover:border-zinc-200 dark:hover:border-zinc-700/60"
@@ -1222,6 +1451,24 @@ export default function ChatPanel({ onBack }: { onBack: () => void }) {
           >
             {uploading ? <Loader2 className="h-5 w-5 animate-spin text-blue-500" /> : <Paperclip className="h-5 w-5" />}
           </button>
+          <div className="relative flex-1 flex">
+          {mention && mentionCandidates.length > 0 && (
+            <ul role="listbox" aria-label="Mention someone" className="absolute bottom-full mb-1 left-0 z-30 w-64 max-h-56 overflow-y-auto rounded-xl border border-line bg-surface shadow-2xl py-1">
+              {mentionCandidates.map((u, i) => (
+                <li key={u.id} role="option" aria-selected={i === mentionIdx}>
+                  <button
+                    type="button"
+                    onMouseDown={(e) => { e.preventDefault(); pickMention(u.username); }}
+                    className={`w-full text-left px-3 py-1.5 text-sm flex items-center gap-2 ${i === mentionIdx ? "bg-surface-hover" : ""}`}
+                  >
+                    <Avatar name={u.display_name} id={u.id} fileId={u.avatar_file_id} size="sm" />
+                    <span className="truncate font-medium">{u.display_name}</span>
+                    <span className="text-xs text-ink-muted truncate">@{u.username}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
           <textarea
             ref={textareaRef}
             value={text}
@@ -1234,6 +1481,24 @@ export default function ChatPanel({ onBack }: { onBack: () => void }) {
             title="Enter to send, Shift+Enter for new line"
             className="flex-1 resize-none rounded-2xl border border-zinc-200 dark:border-white/10 bg-zinc-50 dark:bg-zinc-900/90 px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 max-h-32 transition shadow-2xs text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 dark:placeholder:text-zinc-500"
           />
+          </div>
+          {recording ? (
+            <>
+              <span className="h-10 px-3 rounded-xl flex items-center gap-2 text-xs font-semibold text-rose-600" role="status" aria-live="polite">
+                <span className="h-2 w-2 rounded-full bg-rose-500 animate-pulse" /> {Math.floor(recSecs / 60)}:{String(recSecs % 60).padStart(2, "0")}
+              </span>
+              <button onClick={() => stopRecording(false)} className="h-10 w-10 rounded-xl hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center justify-center text-zinc-500" aria-label="Cancel recording" title="Cancel">
+                <X className="h-5 w-5" />
+              </button>
+              <button onClick={() => stopRecording(true)} className="h-10 w-10 rounded-xl bg-rose-600 hover:bg-rose-500 text-white flex items-center justify-center shrink-0" aria-label="Send voice message" title="Send voice message">
+                <Square className="h-4 w-4" fill="currentColor" />
+              </button>
+            </>
+          ) : !text.trim() && canRecord ? (
+            <button onClick={() => void startRecording()} disabled={uploading} className="h-10 w-10 rounded-xl hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center justify-center text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 shrink-0 transition cursor-pointer" aria-label="Record voice message" title="Record voice message">
+              <Mic className="h-5 w-5" />
+            </button>
+          ) : (
           <button
             onClick={send}
             disabled={!text.trim()}
@@ -1243,8 +1508,32 @@ export default function ChatPanel({ onBack }: { onBack: () => void }) {
           >
             <Send className="h-4 w-4" />
           </button>
+          )}
         </div>
+        )}
       </div>
+
+      {active && (
+        <PollComposer
+          open={showPoll}
+          onClose={() => setShowPoll(false)}
+          onCreate={(poll) => sendMessage(active, poll.question, undefined, undefined, { poll })}
+        />
+      )}
+      {active && threadRoot && <ThreadModal convo={active} root={threadRoot} onClose={() => setThreadRoot(null)} />}
+      <Modal open={blockConfirm} onClose={() => setBlockConfirm(false)} title="Block this person?">
+        <div className="space-y-4">
+          <p className="text-sm text-zinc-400">
+            <span className="font-semibold text-zinc-900 dark:text-zinc-200">{peer?.display_name}</span> won't be able to send you direct messages, and you won't be able to send them any. Group chats and calls are unaffected. You can unblock them any time.
+          </p>
+          <div className="flex justify-end gap-2">
+            <button type="button" className={btnSecondary} onClick={() => setBlockConfirm(false)}>Cancel</button>
+            <button type="button" className={btnDestructive} onClick={() => void toggleBlock()} disabled={blockBusy}>
+              {blockBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : null} Block
+            </button>
+          </div>
+        </div>
+      </Modal>
 
       {/* Forward Message Modal */}
       {lightbox && (
@@ -1391,7 +1680,18 @@ export default function ChatPanel({ onBack }: { onBack: () => void }) {
                     )}
                   </div>
                 )}
-                <p className="text-xs text-zinc-400">{group.members.length} members</p>
+                <p className="text-xs text-zinc-400">{group.members.length} members{group.public ? " · public channel" : ""}</p>
+                {canManageGroup && (
+                  <label className="flex items-center gap-2 text-xs text-zinc-500 cursor-pointer pt-1">
+                    <input
+                      type="checkbox"
+                      className="h-3.5 w-3.5 accent-blue-600"
+                      checked={!!group.public}
+                      onChange={(e) => void api.setGroupPublic(group.id, e.target.checked).then(() => useChats.getState().fetchGroups()).catch((err) => setGroupActionError(err?.message ?? "Could not change visibility"))}
+                    />
+                    Public channel (anyone can find and join)
+                  </label>
+                )}
                 {group.avatar_file_id != null && canManageGroup && (
                   <button type="button" onClick={() => void removeGroupAvatar()} disabled={groupAvatarBusy} className="text-xs text-rose-500 hover:underline">
                     Remove icon

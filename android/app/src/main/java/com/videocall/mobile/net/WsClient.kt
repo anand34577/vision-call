@@ -29,6 +29,9 @@ class WsClient(private val api: Api, private val deviceId: String) {
     var replaced = false
         private set
 
+    /** The server refused the socket with 401: the session is gone (expired or revoked). */
+    var onAuthFailed: (() -> Unit)? = null
+
     /**
      * Called with true while a reconnect is pending and false once connected
      * (or given up). SessionManager holds a CPU wake lock meanwhile: with the
@@ -58,10 +61,10 @@ class WsClient(private val api: Api, private val deviceId: String) {
                 val obj = el as? JsonObject ?: return
                 val type = (obj["type"] as? kotlinx.serialization.json.JsonPrimitive)?.content ?: return
                 val data = obj["data"] ?: JsonNull
-                if (type == "ws:replaced") {
-                    wantConnected = false
-                    replaced = true
-                }
+                // Only ever sent for another connection from this same device (a
+                // second app instance). Other devices no longer replace us, so
+                // just take the slot back after a short pause.
+                if (type == "ws:replaced") replaced = true
                 emit(type, data)
             }
 
@@ -70,6 +73,12 @@ class WsClient(private val api: Api, private val deviceId: String) {
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                if (response?.code == 401) {
+                    wantConnected = false
+                    onGone()
+                    main.post { onAuthFailed?.invoke() }
+                    return
+                }
                 onGone()
             }
         })
@@ -79,6 +88,10 @@ class WsClient(private val api: Api, private val deviceId: String) {
     private fun onGone() {
         ws = null
         emit("ws:close", JsonNull)
+        if (replaced) {
+            replaced = false
+            backoffMs = 5000
+        }
         if (wantConnected) scheduleReconnect()
     }
 

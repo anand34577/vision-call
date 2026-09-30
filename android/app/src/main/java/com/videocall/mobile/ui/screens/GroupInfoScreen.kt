@@ -72,9 +72,25 @@ fun GroupInfoScreen(groupId: Long, onBack: () -> Unit, onLeft: () -> Unit) {
                 Column {
                     Text(g.name, style = MaterialTheme.typography.titleLarge)
                     Text("${g.members.size} members", style = MaterialTheme.typography.bodyMedium)
+                    if (g.topic.isNotBlank()) Text(g.topic, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
             Divider()
+            if (amOwnerOrAdmin) {
+                Row(Modifier.fillMaxWidth().padding(16.dp, 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Public channel", style = MaterialTheme.typography.bodyLarge)
+                        Text("Anyone on this server can find and join", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Switch(g.public, { on ->
+                        scope.launch {
+                            runCatching { SessionManager.api.setGroupPublic(groupId, on) }.onFailure { showError(it.message ?: "Couldn't change visibility") }
+                            refresh()
+                        }
+                    })
+                }
+                Divider()
+            }
             Row(Modifier.fillMaxWidth().padding(16.dp, 8.dp), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text("Members", style = MaterialTheme.typography.titleMedium)
                 if (amOwnerOrAdmin) TextButton(onClick = { showAddMembers = true }) { Text("Add") }
@@ -140,14 +156,20 @@ fun GroupInfoScreen(groupId: Long, onBack: () -> Unit, onLeft: () -> Unit) {
 
         if (renaming) {
             var newName by remember { mutableStateOf(g.name) }
+            var newTopic by remember { mutableStateOf(g.topic) }
             AlertDialog(
                 onDismissRequest = { renaming = false },
-                title = { Text("Rename group") },
-                text = { OutlinedTextField(newName, { newName = it }, singleLine = true, modifier = Modifier.fillMaxWidth()) },
+                title = { Text("Edit group") },
+                text = {
+                    Column {
+                        OutlinedTextField(newName, { newName = it.take(64) }, label = { Text("Name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                        OutlinedTextField(newTopic, { newTopic = it.take(200) }, label = { Text("Topic") }, placeholder = { Text("What is this group for?") }, modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
+                    }
+                },
                 confirmButton = {
                     TextButton(onClick = {
                         scope.launch {
-                            runCatching { SessionManager.api.renameGroup(groupId, newName.trim()) }
+                            runCatching { SessionManager.api.updateGroup(groupId, name = newName.trim(), topic = newTopic.trim()) }
                                 .onFailure { showError(it.message ?: "Failed to rename group") }
                             refresh()
                         }

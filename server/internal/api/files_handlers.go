@@ -264,3 +264,24 @@ func sanitizeHeaderName(name string) string {
 	}, name)
 	return name
 }
+
+var lastRetentionRun time.Time
+
+// PurgeOldMessages enforces MESSAGE_RETENTION_DAYS, at most once a day.
+// Files they referenced become orphans and are removed by CleanupOrphanFiles.
+func (a *API) PurgeOldMessages() {
+	days := a.settings.Get().MessageRetentionDays
+	if days <= 0 || time.Since(lastRetentionRun) < 23*time.Hour {
+		return
+	}
+	lastRetentionRun = time.Now()
+	cutoff := time.Now().AddDate(0, 0, -days).UTC().Format(time.RFC3339)
+	n, err := a.db.PurgeMessagesBefore(cutoff)
+	if err != nil {
+		a.log.Warn("message retention purge", "err", err)
+		return
+	}
+	if n > 0 {
+		a.log.Info("message retention: purged old messages", "count", n, "older_than_days", days)
+	}
+}

@@ -15,6 +15,12 @@ import (
 
 const CookieName = "vc_session"
 
+// TokenLifetime is how long the signed token and its cookie stay valid. The
+// real, shorter-lived limit is the session row's expires_at, which slides
+// forward while the user is active (see ValidateSession) — so the token never
+// needs re-issuing and parallel requests can't invalidate each other.
+const TokenLifetime = 365 * 24 * time.Hour
+
 type Claims struct {
 	UserID    int64  `json:"uid"`
 	SessionID string `json:"sid"`
@@ -54,13 +60,13 @@ func ParseToken(secret []byte, raw string) (*Claims, error) {
 }
 
 // MintSession generates a fresh session id and a signed token bound to it.
-func MintSession(secret []byte, userID int64, role string, ttl time.Duration) (sessionID, token string, err error) {
+func MintSession(secret []byte, userID int64, role string) (sessionID, token string, err error) {
 	buf := make([]byte, 16)
 	if _, err = rand.Read(buf); err != nil {
 		return "", "", err
 	}
 	sessionID = hex.EncodeToString(buf)
-	token, err = MintToken(secret, userID, sessionID, role, ttl)
+	token, err = MintToken(secret, userID, sessionID, role, TokenLifetime)
 	return sessionID, token, err
 }
 
@@ -71,7 +77,9 @@ func HashToken(raw string) string {
 
 // ValidateSession checks a raw token against its stored session row and returns
 // the owning user. Used by both HTTP middleware and the WebSocket upgrade.
-func ValidateSession(dbh *db.DB, secret []byte, rawToken string) (*db.User, error) {
+// slide is the inactivity timeout: while a session is used, its expiry is
+// pushed out to now+slide (at most every ten minutes). 0 disables sliding.
+func ValidateSession(dbh *db.DB, secret []byte, rawToken string, slide time.Duration) (*db.User, error) {
 	claims, err := ParseToken(secret, rawToken)
 	if err != nil {
 		return nil, err
@@ -96,6 +104,9 @@ func ValidateSession(dbh *db.DB, secret []byte, rawToken string) (*db.User, erro
 	}
 	if user.Disabled {
 		return nil, errors.New("auth: user disabled")
+	}
+	if slide > 0 && time.Until(expires) < slide-10*time.Minute {
+		_ = dbh.ExtendSession(claims.SessionID, time.Now().Add(slide))
 	}
 	return user, nil
 }

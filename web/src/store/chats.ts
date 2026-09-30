@@ -4,12 +4,26 @@ import { ws } from "../lib/ws";
 import { notify } from "../lib/media";
 import { usePresence } from "./presence";
 import { encryptForRecipients, decryptMessageContent, usersMissingKeys } from "../lib/crypto";
-import type { Convo, Group, Message, MessagePreview } from "../lib/types";
+import type { Convo, ConvoPref, Group, Message, MessagePreview } from "../lib/types";
 import { useAuth } from "./auth";
+import { useDirectory } from "./directory";
 import { toast } from "./toast";
 
 // isMentioned reports whether content contains "@username" as a whole token
 // (not just a substring of a longer name), case-insensitively.
+// mentionedIDs resolves "@username" tokens in text to user ids from the
+// directory. The ids travel as message metadata so mentions still notify
+// people when the text itself is end-to-end encrypted.
+export function mentionedIDs(text: string): number[] {
+  const users = useDirectory.getState().users;
+  const ids = new Set<number>();
+  for (const m of text.matchAll(/(^|\s)@([a-zA-Z0-9._-]{2,32})/g)) {
+    const u = users.find((x) => x.username.toLowerCase() === m[2].toLowerCase());
+    if (u) ids.add(u.id);
+  }
+  return [...ids];
+}
+
 export function isMentioned(content: string, username: string): boolean {
   if (!username) return false;
   const re = new RegExp(`(^|\\s)@${username.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i");
@@ -77,6 +91,20 @@ function updateMessage(
   set((s) => ({ messagesByDm: { ...s.messagesByDm, [peerID]: apply(s.messagesByDm[peerID] ?? []) } }));
 }
 
+// bumpThread adds one to a thread root's reply count when a new reply lands.
+function bumpThread(set: (fn: (s: ChatsState) => Partial<ChatsState>) => void, msg: Message) {
+  const rootID = msg.thread_root_id;
+  if (!rootID) return;
+  const bump = (list: Message[] = []) => list.map((m) => (m.id === rootID ? { ...m, thread_count: (m.thread_count ?? 0) + 1 } : m));
+  if (msg.group_id != null) {
+    set((s) => ({ messagesByGroup: { ...s.messagesByGroup, [msg.group_id!]: bump(s.messagesByGroup[msg.group_id!]) } }));
+    return;
+  }
+  const me = useAuth.getState().me;
+  const peer = me && msg.sender_id === me.id ? msg.recipient_id : msg.sender_id;
+  if (peer != null) set((s) => ({ messagesByDm: { ...s.messagesByDm, [peer]: bump(s.messagesByDm[peer]) } }));
+}
+
 function markDeleted(
   set: (fn: (s: ChatsState) => Partial<ChatsState>) => void,
   ref: { id: number; sender_id: number; recipient_id: number | null; group_id: number | null },
@@ -105,6 +133,20 @@ interface ChatsState {
   sendError: string | null;
   historyLoading: Record<string, boolean>;
   hasMore: Record<string, boolean>;
+  /** Per-conversation mute/archive, keyed like `dm:5` / `g:3`. */
+  convoPrefs: Record<string, ConvoPref>;
+  /** groupID -> userID -> last message id that user has read. */
+  groupReads: Record<number, Record<number, number>>;
+  /** ids of the people I have blocked. */
+  blocked: number[];
+  fetchBlocked: () => Promise<void>;
+  setBlocked: (userID: number, blocked: boolean) => Promise<void>;
+  loadThread: (rootID: number) => Promise<void>;
+  votePoll: (pollID: number, optionID: number) => void;
+  closePoll: (pollID: number) => void;
+  fetchConvoPrefs: () => Promise<void>;
+  setConvoPref: (c: Convo, patch: { muted?: boolean; archived?: boolean }) => Promise<void>;
+  fetchGroupReads: (groupID: number) => Promise<void>;
 
   setActive: (c: Convo | null) => void;
   clearSendError: () => void;
@@ -113,7 +155,13 @@ interface ChatsState {
   loadMessages: (c: Convo, before?: number) => Promise<void>;
   fetchGroups: () => Promise<void>;
   fetchRecent: () => Promise<void>;
-  sendMessage: (c: Convo, content: string, fileID?: number, replyToID?: number) => void;
+  sendMessage: (
+    c: Convo,
+    content: string,
+    fileID?: number,
+    replyToID?: number,
+    opts?: { threadRootID?: number; poll?: { question: string; options: string[]; multi: boolean } },
+  ) => void;
   retryMessage: (msg: Message) => void;
   deleteMessage: (msg: Message) => void;
   editMessage: (msg: Message, content: string) => void;
@@ -145,6 +193,81 @@ let wsRegistered = false;
 let optimisticSequence = 0;
 
 export const useChats = create<ChatsState>((set, get) => ({
+  blocked: [],
+  fetchBlocked: async () => {
+    try {
+      set({ blocked: await api.blockedUsers() });
+    } catch {
+      /* keep what we have */
+    }
+  },
+  setBlocked: async (userID, blocked) => {
+    if (blocked) await api.blockUser(userID);
+    else await api.unblockUser(userID);
+    await get().fetchBlocked();
+  },
+  loadThread: async (rootID) => {
+    const replies = await api.thread(rootID);
+    if (replies.length === 0) return;
+    set((s) => {
+      const merge = (list: Message[] = []) => {
+        const byID = new Map(list.map((m) => [m.id, m]));
+        for (const r of replies) byID.set(r.id, byID.get(r.id) ?? r);
+        return [...byID.values()].sort(messageOrder);
+      };
+      const first = replies[0];
+      if (first.group_id != null) return { messagesByGroup: { ...s.messagesByGroup, [first.group_id]: merge(s.messagesByGroup[first.group_id]) } };
+      const me = useAuth.getState().me;
+      const peer = me && first.sender_id === me.id ? first.recipient_id : first.sender_id;
+      return peer == null ? {} : { messagesByDm: { ...s.messagesByDm, [peer]: merge(s.messagesByDm[peer]) } };
+    });
+    get().decryptPending(replies);
+  },
+  votePoll: (pollID, optionID) => {
+    ws.send("poll:vote", { poll_id: pollID, option_id: optionID });
+  },
+  closePoll: (pollID) => {
+    ws.send("poll:close", { poll_id: pollID });
+  },
+  convoPrefs: {},
+  groupReads: {},
+  fetchConvoPrefs: async () => {
+    try {
+      const list = await api.convoPrefs();
+      const map: Record<string, ConvoPref> = {};
+      for (const p of list) map[p.kind === "dm" ? `dm:${p.target_id}` : `g:${p.target_id}`] = p;
+      set({ convoPrefs: map });
+    } catch {
+      /* keep what we have */
+    }
+  },
+  setConvoPref: async (c, patch) => {
+    const k = key(c);
+    const cur = get().convoPrefs[k];
+    const next: ConvoPref = {
+      kind: c.kind,
+      target_id: c.kind === "dm" ? c.peerID : c.groupID,
+      muted: patch.muted ?? cur?.muted ?? false,
+      archived: patch.archived ?? cur?.archived ?? false,
+    };
+    set((s) => ({ convoPrefs: { ...s.convoPrefs, [k]: next } }));
+    try {
+      await api.setConvoPref(next);
+    } catch {
+      set((s) => ({ convoPrefs: { ...s.convoPrefs, ...(cur ? { [k]: cur } : {}) } }));
+    }
+  },
+  fetchGroupReads: async (groupID) => {
+    try {
+      const r = await api.groupReadState(groupID);
+      const map: Record<number, number> = {};
+      for (const [uid, id] of Object.entries(r)) map[Number(uid)] = id;
+      set((s) => ({ groupReads: { ...s.groupReads, [groupID]: map } }));
+    } catch {
+      /* not fatal */
+    }
+  },
+
   messagesByDm: {},
   messagesByGroup: {},
   groups: [],
@@ -244,7 +367,11 @@ export const useChats = create<ChatsState>((set, get) => ({
 
   fetchGroups: async () => {
     try {
-      set({ groups: await api.groups() });
+      const groups = await api.groups();
+      set((s) => ({
+        groups,
+        active: s.active?.kind === "group" && !groups.some((g) => g.id === (s.active as { groupID: number }).groupID) ? null : s.active,
+      }));
     } catch {
       /* ignore */
     }
@@ -273,6 +400,8 @@ export const useChats = create<ChatsState>((set, get) => ({
       for (const m of recent.groups) {
         if (m.group_id != null) byGroup[m.group_id] = add(byGroup[m.group_id], m);
       }
+      // Chat-list previews of encrypted chats need the plaintext.
+      queueMicrotask(() => get().decryptPending([...recent.dms, ...recent.groups]));
       return { messagesByDm: byDm, messagesByGroup: byGroup };
     });
     get().decryptPending([...recent.dms, ...recent.groups]);
@@ -385,7 +514,7 @@ export const useChats = create<ChatsState>((set, get) => ({
     }
   },
 
-  sendMessage: (c, content, fileID, replyToID) => {
+  sendMessage: (c, content, fileID, replyToID, opts) => {
     if (!content.trim() && !fileID) return;
     const me = useAuth.getState().me;
     if (!me) return;
@@ -407,7 +536,8 @@ export const useChats = create<ChatsState>((set, get) => ({
       read_at: null,
       reply_to_id: replyToID ?? null,
       reply_to: replyTarget ? buildReplyPreview(replyTarget) : undefined,
-      is_encrypted: get().isEncrypted(c),
+      thread_root_id: opts?.threadRootID ?? null,
+      is_encrypted: get().isEncrypted(c) && !opts?.poll,
       pending: true,
       failed: false,
       clientID,
@@ -458,9 +588,16 @@ export const useChats = create<ChatsState>((set, get) => ({
       group_id: c.kind === "group" ? c.groupID : null,
       file_id: fileID ?? null,
       reply_to_id: replyToID ?? null,
+      mentions: mentionedIDs(content),
+      thread_root_id: opts?.threadRootID ?? null,
     };
 
     const text = content.trim();
+    if (opts?.poll) {
+      // Polls are stored readable (the server tallies them), so never encrypted.
+      if (!ws.send("message:send", { ...basePayload, content: text, poll: opts.poll })) fail();
+      return;
+    }
     if (text && get().isEncrypted(c)) {
       const recipientIDs = c.kind === "dm"
         ? [me.id, c.peerID]
@@ -519,7 +656,7 @@ export const useChats = create<ChatsState>((set, get) => ({
       }
       return { messagesByGroup: { ...s.messagesByGroup, [bucketKey]: (s.messagesByGroup[bucketKey] ?? []).filter((m) => m.id !== msg.id) } };
     });
-    get().sendMessage(convo, msg.content, msg.file_id ?? undefined, msg.reply_to_id ?? undefined);
+    get().sendMessage(convo, msg.content, msg.file_id ?? undefined, msg.reply_to_id ?? undefined, msg.thread_root_id ? { threadRootID: msg.thread_root_id } : undefined);
   },
 
   sendTyping: (c) => {
@@ -562,8 +699,42 @@ export const useChats = create<ChatsState>((set, get) => ({
         clearTimeout(pending.timer);
         pendingAcks.delete(d.client_id);
         pending.patch(d.message as Message);
+        bumpThread(set, d.message as Message);
+      } else if (typeof d.client_id === "string" && d.client_id.startsWith("sync-")) {
+        // Sent from another of my devices: show it here too.
+        const msg = d.message as Message;
+        const bucket = msg.group_id ?? msg.recipient_id;
+        if (bucket != null) {
+          bumpThread(set, msg);
+          set((s) => {
+            const field = msg.group_id != null ? "messagesByGroup" : "messagesByDm";
+            const arr = [...(s[field][bucket] ?? []).filter((m) => m.id !== msg.id), msg].sort(messageOrder);
+            return { [field]: { ...s[field], [bucket]: arr } } as Partial<ChatsState>;
+          });
+        }
       }
       get().decryptPending([d.message as Message]);
+    });
+
+    ws.on("poll:updated", (d) => {
+      const ref = { id: d.message_id as number, sender_id: d.sender_id as number, recipient_id: d.recipient_id ?? null, group_id: d.group_id ?? null };
+      updateMessage(set, ref, (m) => ({ ...m, poll: d.poll }));
+    });
+    ws.on("blocks:changed", () => {
+      void get().fetchBlocked();
+    });
+    ws.on("group:changed", () => {
+      void get().fetchGroups();
+    });
+    ws.on("conversation:prefs", (d) => {
+      const p = d as ConvoPref;
+      set((s) => ({ convoPrefs: { ...s.convoPrefs, [p.kind === "dm" ? `dm:${p.target_id}` : `g:${p.target_id}`]: p } }));
+    });
+    ws.on("message:group-read", (d) => {
+      const gid = d.group_id as number;
+      set((s) => ({
+        groupReads: { ...s.groupReads, [gid]: { ...(s.groupReads[gid] ?? {}), [d.from as number]: d.last_read_id as number } },
+      }));
     });
 
     ws.on("error", (d) => {
@@ -582,6 +753,7 @@ export const useChats = create<ChatsState>((set, get) => ({
       }
       if (!convo) return;
       const bucketKey = convo.kind === "dm" ? convo.peerID : convo.groupID;
+      const existed = ((convo.kind === "dm" ? get().messagesByDm[bucketKey] : get().messagesByGroup[bucketKey]) ?? []).some((m) => m.id === msg.id);
       set((s) => {
       if (convo!.kind === "dm") {
           const arr = [...(s.messagesByDm[bucketKey] ?? []).filter((m) => m.id !== msg.id), msg].sort(messageOrder);
@@ -591,6 +763,7 @@ export const useChats = create<ChatsState>((set, get) => ({
         return { messagesByGroup: { ...s.messagesByGroup, [bucketKey]: arr } };
       });
       get().decryptPending([msg]);
+      if (!existed) bumpThread(set, msg);
       // unread badge unless viewing this convo and page visible
       const active = get().active;
       const isActive =
@@ -606,14 +779,15 @@ export const useChats = create<ChatsState>((set, get) => ({
         // Encrypted content can't be scanned for a mention without first
         // decrypting it (async) — notifications for encrypted messages skip
         // the "mentioned you" framing rather than block on that.
-        const mentioned = !msg.is_encrypted && isMentioned(msg.content, me.username);
+        const mentioned = !!msg.mentions?.includes(me.id) || (!msg.is_encrypted && isMentioned(msg.content, me.username));
+        const muted = !!get().convoPrefs[k]?.muted && !mentioned;
         const title = mentioned
           ? `${from} mentioned you${group ? ` in ${group.name}` : ""}`
           : group
             ? `${from} in ${group.name}`
             : from;
         // Do Not Disturb still tracks unread counts, just no popup/sound.
-        if (usePresence.getState().myStatus !== "dnd") {
+        if (usePresence.getState().myStatus !== "dnd" && !muted) {
           const body = msg.is_encrypted ? "Encrypted message" : msg.file && !msg.content ? `Attachment: ${msg.file.name}` : msg.content;
           const c = convo;
           notify(title, body, {
@@ -694,7 +868,7 @@ export const useChats = create<ChatsState>((set, get) => ({
       const unread: Record<string, number> = {};
       for (const [peer, n] of Object.entries(counts)) unread[`dm:${peer}`] = n;
       for (const [gid, n] of Object.entries(groupCounts)) unread[`g:${gid}`] = n;
-      set({ unread: { ...get().unread, ...unread } });
+      set({ unread });
     });
   },
 }));

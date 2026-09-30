@@ -52,6 +52,16 @@ func (a *API) enrichMessages(msgs []*db.Message) {
 			m.Reactions = reactions[m.ID]
 		}
 	}
+	if counts, err := a.db.ThreadCounts(msgIDs); err == nil {
+		for _, m := range msgs {
+			m.ThreadCount = counts[m.ID]
+		}
+	}
+	if polls, err := a.db.PollsForMessages(msgIDs); err == nil {
+		for _, m := range msgs {
+			m.Poll = polls[m.ID]
+		}
+	}
 	if len(replyIDs) > 0 {
 		if previews, err := a.db.ReplyPreviews(replyIDs); err == nil {
 			for _, m := range msgs {
@@ -143,6 +153,8 @@ func (a *API) handleListGroups(w http.ResponseWriter, r *http.Request) {
 type createGroupRequest struct {
 	Name      string  `json:"name"`
 	MemberIDs []int64 `json:"member_ids"`
+	// Public makes it a channel anyone on the server can find and join.
+	Public bool `json:"public"`
 }
 
 func (a *API) handleCreateGroup(w http.ResponseWriter, r *http.Request) {
@@ -172,7 +184,13 @@ func (a *API) handleCreateGroup(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "could not create group")
 		return
 	}
+	if req.Public {
+		if err := a.db.SetGroupPublic(group.ID, true); err == nil {
+			group.Public = true
+		}
+	}
 	a.audit(r, "group_create", "group", &group.ID, "name="+group.Name)
+	a.notifyGroup(group.ID)
 	writeJSON(w, http.StatusCreated, group)
 }
 
@@ -192,10 +210,12 @@ func (a *API) handleDeleteGroup(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusForbidden, "only the group owner can delete it")
 		return
 	}
+	members, _ := a.db.GroupMemberIDs(id)
 	if err := a.db.DeleteGroup(id); err != nil {
 		writeErr(w, http.StatusInternalServerError, "could not delete group")
 		return
 	}
+	a.notifyUsers(members)
 	if closer, ok := a.hub.(interface{ CloseRoom(string) }); ok {
 		closer.CloseRoom("group:" + strconv.FormatInt(id, 10))
 	}
@@ -207,6 +227,7 @@ type updateGroupRequest struct {
 	Name         *string `json:"name"`
 	Topic        *string `json:"topic"`
 	AvatarFileID *int64  `json:"avatar_file_id"`
+	Public       *bool   `json:"public"`
 }
 
 // handleRenameGroup also handles topic and icon updates despite the name —
@@ -248,6 +269,12 @@ func (a *API) handleRenameGroup(w http.ResponseWriter, r *http.Request) {
 		}
 		req.Topic = &topic
 	}
+	if req.Public != nil {
+		if err := a.db.SetGroupPublic(id, *req.Public); err != nil {
+			writeErr(w, http.StatusInternalServerError, "could not update group visibility")
+			return
+		}
+	}
 	if req.Name != nil || req.Topic != nil {
 		if err := a.db.UpdateGroup(id, req.Name, req.Topic); err != nil {
 			writeErr(w, http.StatusInternalServerError, "could not update group")
@@ -276,6 +303,7 @@ func (a *API) handleRenameGroup(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	a.audit(r, "group_update", "group", &id, "")
+	a.notifyGroup(id)
 	group, err = a.db.GetGroup(id)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "could not reload group")
@@ -323,6 +351,7 @@ func (a *API) handleSetGroupMemberRole(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.audit(r, "group_set_role", "group", &id, fmt.Sprintf("user_id=%d role=%s", targetID, req.Role))
+	a.notifyGroup(id)
 	group, err = a.db.GetGroup(id)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "could not reload group")
@@ -556,6 +585,7 @@ func (a *API) handleAddGroupMembers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.audit(r, "group_add_members", "group", &id, fmt.Sprintf("%v", req.MemberIDs))
+	a.notifyGroup(id)
 	group, err = a.db.GetGroup(id)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "could not reload group")
@@ -612,6 +642,8 @@ func (a *API) handleRemoveGroupMember(w http.ResponseWriter, r *http.Request) {
 		action = "group_leave"
 	}
 	a.audit(r, action, "group", &id, fmt.Sprintf("user_id=%d", targetID))
+	a.notifyGroup(id)
+	a.notifyUsers([]int64{targetID})
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
@@ -631,6 +663,180 @@ func (a *API) handleGroupHistory(w http.ResponseWriter, r *http.Request) {
 	msgs, err := a.db.ListGroupMessages(id, before, limit)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "could not load messages")
+		return
+	}
+	a.enrichMessages(msgs)
+	writeJSON(w, http.StatusOK, msgs)
+}
+
+// notifyUsers tells each user's devices to reload their group list.
+func (a *API) notifyUsers(ids []int64) {
+	for _, id := range ids {
+		a.hub.SendToUser(id, "group:changed", nil)
+	}
+}
+
+// notifyGroup tells every current member of a group to reload their groups.
+func (a *API) notifyGroup(groupID int64) {
+	if ids, err := a.db.GroupMemberIDs(groupID); err == nil {
+		a.notifyUsers(ids)
+	}
+}
+
+// handleListConvoPrefs returns the caller's mute/archive settings.
+func (a *API) handleListConvoPrefs(w http.ResponseWriter, r *http.Request) {
+	prefs, err := a.db.ListConversationPrefs(auth.CurrentUser(r).ID)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "could not load conversation settings")
+		return
+	}
+	writeJSON(w, http.StatusOK, prefs)
+}
+
+// handleSetConvoPref stores mute/archive for one DM or group, then tells the
+// user's other devices so they stay in step.
+func (a *API) handleSetConvoPref(w http.ResponseWriter, r *http.Request) {
+	me := auth.CurrentUser(r)
+	var p db.ConversationPref
+	if err := readJSON(r, &p); err != nil || (p.Kind != "dm" && p.Kind != "group") || p.TargetID <= 0 {
+		writeErr(w, http.StatusBadRequest, "invalid conversation setting")
+		return
+	}
+	if err := a.db.SetConversationPref(me.ID, p); err != nil {
+		writeErr(w, http.StatusInternalServerError, "could not save conversation setting")
+		return
+	}
+	a.hub.SendToUser(me.ID, "conversation:prefs", p)
+	writeJSON(w, http.StatusOK, p)
+}
+
+// handleUnreadSummary is a cheap "anything new?" check for clients whose
+// realtime connection isn't running (a phone whose background service was
+// stopped by the OS). It carries counts only, no message content.
+func (a *API) handleUnreadSummary(w http.ResponseWriter, r *http.Request) {
+	me := auth.CurrentUser(r)
+	dms, err := a.db.UnreadDirectCounts(me.ID)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "could not load unread counts")
+		return
+	}
+	groups, err := a.db.GroupUnreadCounts(me.ID)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "could not load unread counts")
+		return
+	}
+	total := 0
+	for _, n := range dms {
+		total += n
+	}
+	for _, n := range groups {
+		total += n
+	}
+	writeJSON(w, http.StatusOK, map[string]int{"total": total, "chats": len(dms) + len(groups)})
+}
+
+// ---- channels, blocking, threads, admin overview ----
+
+// handleListPublicGroups lists channels the caller can join.
+func (a *API) handleListPublicGroups(w http.ResponseWriter, r *http.Request) {
+	groups, err := a.db.ListPublicGroups(auth.CurrentUser(r).ID)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "could not list channels")
+		return
+	}
+	writeJSON(w, http.StatusOK, groups)
+}
+
+// handleJoinGroup lets anyone join a public channel.
+func (a *API) handleJoinGroup(w http.ResponseWriter, r *http.Request) {
+	me := auth.CurrentUser(r)
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil || !a.db.IsGroupPublic(id) {
+		writeErr(w, http.StatusNotFound, "channel not found")
+		return
+	}
+	if err := a.db.AddGroupMembers(id, []int64{me.ID}); err != nil {
+		writeErr(w, http.StatusInternalServerError, "could not join channel")
+		return
+	}
+	a.audit(r, "group_join", "group", &id, "")
+	a.notifyGroup(id)
+	group, err := a.db.GetGroup(id)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "could not load channel")
+		return
+	}
+	writeJSON(w, http.StatusOK, group)
+}
+
+// handleAdminListGroups is the admin overview of every group and channel.
+func (a *API) handleAdminListGroups(w http.ResponseWriter, r *http.Request) {
+	groups, err := a.db.ListAllGroups()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "could not list groups")
+		return
+	}
+	writeJSON(w, http.StatusOK, groups)
+}
+
+func (a *API) handleBlockUser(w http.ResponseWriter, r *http.Request) {
+	me := auth.CurrentUser(r)
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil || id == me.ID {
+		writeErr(w, http.StatusBadRequest, "invalid user")
+		return
+	}
+	if _, err := a.db.GetUserByID(id); err != nil {
+		writeErr(w, http.StatusNotFound, "user not found")
+		return
+	}
+	if err := a.db.BlockUser(me.ID, id); err != nil {
+		writeErr(w, http.StatusInternalServerError, "could not block user")
+		return
+	}
+	a.hub.SendToUser(me.ID, "blocks:changed", nil)
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+func (a *API) handleUnblockUser(w http.ResponseWriter, r *http.Request) {
+	me := auth.CurrentUser(r)
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid user")
+		return
+	}
+	if err := a.db.UnblockUser(me.ID, id); err != nil {
+		writeErr(w, http.StatusInternalServerError, "could not unblock user")
+		return
+	}
+	a.hub.SendToUser(me.ID, "blocks:changed", nil)
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+func (a *API) handleListBlocked(w http.ResponseWriter, r *http.Request) {
+	ids, err := a.db.ListBlocked(auth.CurrentUser(r).ID)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "could not load blocked users")
+		return
+	}
+	writeJSON(w, http.StatusOK, ids)
+}
+
+// handleThread returns the replies inside one message's thread.
+func (a *API) handleThread(w http.ResponseWriter, r *http.Request) {
+	me := auth.CurrentUser(r)
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid message id")
+		return
+	}
+	if ok, err := a.db.CanSeeMessage(id, me.ID); err != nil || !ok {
+		writeErr(w, http.StatusNotFound, "message not found")
+		return
+	}
+	msgs, err := a.db.ThreadReplies(id, 300)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "could not load thread")
 		return
 	}
 	a.enrichMessages(msgs)

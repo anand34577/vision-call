@@ -2,6 +2,7 @@ package db
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"strings"
 )
@@ -26,7 +27,15 @@ type Message struct {
 	IsEncrypted bool    `json:"is_encrypted"`
 	EncIV       *string `json:"enc_iv,omitempty"`
 	EncKeys     *string `json:"enc_keys,omitempty"`
+	// Mentions are the user ids @-mentioned in the message; the sending client
+	// supplies them because the server can't read end-to-end encrypted text.
+	Mentions []int64 `json:"mentions,omitempty"`
+	// ThreadRootID is set on a reply that lives inside another message's thread.
+	ThreadRootID *int64 `json:"thread_root_id,omitempty"`
 	// Enriched at runtime:
+	ThreadCount int   `json:"thread_count,omitempty"`
+	Poll        *Poll `json:"poll,omitempty"`
+
 	Sender    *UserBrief        `json:"sender,omitempty"`
 	File      *FileBrief        `json:"file,omitempty"`
 	ReplyTo   *MessagePreview   `json:"reply_to,omitempty"`
@@ -66,9 +75,12 @@ type Group struct {
 	CreatedAt    string         `json:"created_at"`
 	AvatarFileID *int64         `json:"avatar_file_id"`
 	Members      []*GroupMember `json:"members"`
+	// Public groups are channels anyone can find and join.
+	Public      bool `json:"public"`
+	MemberCount int  `json:"member_count,omitempty"`
 }
 
-const msgCols = `id, sender_id, recipient_id, group_id, file_id, content, sent_at, delivered_at, read_at, deleted_at, edited_at, reply_to_id, pinned_at, is_encrypted, enc_iv, enc_keys`
+const msgCols = `id, sender_id, recipient_id, group_id, file_id, content, sent_at, delivered_at, read_at, deleted_at, edited_at, reply_to_id, pinned_at, is_encrypted, enc_iv, enc_keys, mentions, thread_root_id`
 
 // prefixCols qualifies every column in a comma-separated column list with a
 // table alias (e.g. "m.id, m.sender_id, ..."). Used instead of "SELECT tbl.*"
@@ -89,12 +101,21 @@ func scanMessage(row interface{ Scan(...any) error }) (*Message, error) {
 	m := &Message{}
 	var rec, grp, fileID, replyTo sql.NullInt64
 	var del, read, deleted, edited, pinned, encIV, encKeys sql.NullString
+	var mentions string
+	var threadRoot sql.NullInt64
 	var isEncrypted int
-	if err := row.Scan(&m.ID, &m.SenderID, &rec, &grp, &fileID, &m.Content, &m.SentAt, &del, &read, &deleted, &edited, &replyTo, &pinned, &isEncrypted, &encIV, &encKeys); err != nil {
+	if err := row.Scan(&m.ID, &m.SenderID, &rec, &grp, &fileID, &m.Content, &m.SentAt, &del, &read, &deleted, &edited, &replyTo, &pinned, &isEncrypted, &encIV, &encKeys, &mentions, &threadRoot); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
 		}
 		return nil, err
+	}
+	if mentions != "" {
+		_ = json.Unmarshal([]byte(mentions), &m.Mentions)
+	}
+	if threadRoot.Valid {
+		t := threadRoot.Int64
+		m.ThreadRootID = &t
 	}
 	m.IsEncrypted = isEncrypted != 0
 	m.EncIV = nullStringPtr(encIV)
@@ -206,8 +227,9 @@ func (d *DB) SearchMessages(userID int64, f SearchFilter) ([]*Message, error) {
 		// plaintext query is meaningless (and would leak nothing since it
 		// just won't match, but excluding it explicitly is the honest
 		// behavior: an E2E message is never server-searchable by design).
-		where += ` AND is_encrypted = 0 AND LOWER(content) LIKE LOWER(?)`
-		args = append(args, "%"+f.Query+"%")
+		where += ` AND is_encrypted = 0 AND LOWER(content) LIKE LOWER(?) ESCAPE '!'`
+		esc := strings.NewReplacer("!", "!!", "%", "!%", "_", "!_").Replace(f.Query)
+		args = append(args, "%"+esc+"%")
 	}
 	if f.SenderID != 0 {
 		where += ` AND sender_id = ?`
@@ -663,6 +685,7 @@ func (d *DB) GetGroup(id int64) (*Group, error) {
 		}
 		g.Members = append(g.Members, b)
 	}
+	g.Public = d.IsGroupPublic(id)
 	return g, rows.Err()
 }
 
@@ -793,6 +816,7 @@ func (d *DB) ListGroupsForUser(userID int64) ([]*Group, error) {
 			g.Members = append(g.Members, b)
 		}
 	}
+	d.markPublic(out)
 	return out, mrows.Err()
 }
 
@@ -902,5 +926,93 @@ func (d *DB) AddGroupMembers(groupID int64, userIDs []int64) error {
 // removal and self-initiated "leave").
 func (d *DB) RemoveGroupMember(groupID, userID int64) error {
 	_, err := d.Exec(`DELETE FROM group_members WHERE group_id = ? AND user_id = ?`, groupID, userID)
+	return err
+}
+
+// SetMessageMentions records who a message @-mentions.
+func (d *DB) SetMessageMentions(id int64, userIDs []int64) error {
+	if len(userIDs) == 0 {
+		return nil
+	}
+	b, err := json.Marshal(userIDs)
+	if err != nil {
+		return err
+	}
+	_, err = d.Exec(`UPDATE messages SET mentions = ? WHERE id = ?`, string(b), id)
+	return err
+}
+
+// DeleteMessageAsModerator soft-deletes any message (group owner/admin or
+// site admin). Whether the caller may do so is checked by the caller.
+func (d *DB) DeleteMessageAsModerator(id int64) (*Message, error) {
+	res, err := d.Exec(`UPDATE messages SET content = '', file_id = NULL, deleted_at = ? WHERE id = ? AND deleted_at IS NULL`, now(), id)
+	if err != nil {
+		return nil, err
+	}
+	if n, err := res.RowsAffected(); err != nil {
+		return nil, err
+	} else if n == 0 {
+		return nil, ErrNotFound
+	}
+	return d.GetMessage(id)
+}
+
+// PurgeMessagesBefore permanently deletes messages older than cutoff
+// (RFC3339), keeping pinned ones. Returns how many were removed.
+func (d *DB) PurgeMessagesBefore(cutoff string) (int64, error) {
+	res, err := d.Exec(`DELETE FROM messages WHERE sent_at < ? AND pinned_at IS NULL`, cutoff)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+// ConversationPref is a user's mute/archive setting for one conversation.
+type ConversationPref struct {
+	Kind     string `json:"kind"` // "dm" | "group"
+	TargetID int64  `json:"target_id"`
+	Muted    bool   `json:"muted"`
+	Archived bool   `json:"archived"`
+}
+
+func (d *DB) ListConversationPrefs(userID int64) ([]ConversationPref, error) {
+	rows, err := d.Query(`SELECT kind, target_id, muted, archived FROM conversation_prefs WHERE user_id = ?`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []ConversationPref{}
+	for rows.Next() {
+		var p ConversationPref
+		var muted, archived int
+		if err := rows.Scan(&p.Kind, &p.TargetID, &muted, &archived); err != nil {
+			return nil, err
+		}
+		p.Muted, p.Archived = muted != 0, archived != 0
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+// SetConversationPref stores a mute/archive setting; a row with both flags off is removed.
+func (d *DB) SetConversationPref(userID int64, p ConversationPref) error {
+	if !p.Muted && !p.Archived {
+		_, err := d.Exec(`DELETE FROM conversation_prefs WHERE user_id = ? AND kind = ? AND target_id = ?`, userID, p.Kind, p.TargetID)
+		return err
+	}
+	m, a := 0, 0
+	if p.Muted {
+		m = 1
+	}
+	if p.Archived {
+		a = 1
+	}
+	q := `INSERT INTO conversation_prefs (user_id, kind, target_id, muted, archived) VALUES (?, ?, ?, ?, ?)
+		ON CONFLICT (user_id, kind, target_id) DO UPDATE SET muted = excluded.muted, archived = excluded.archived`
+	if d.dialect == DialectMySQL {
+		q = `INSERT INTO conversation_prefs (user_id, kind, target_id, muted, archived) VALUES (?, ?, ?, ?, ?)
+			ON DUPLICATE KEY UPDATE muted = VALUES(muted), archived = VALUES(archived)`
+	}
+	_, err := d.Exec(q, userID, p.Kind, p.TargetID, m, a)
 	return err
 }

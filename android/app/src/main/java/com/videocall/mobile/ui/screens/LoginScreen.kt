@@ -49,6 +49,8 @@ fun LoginScreen(onLoggedIn: () -> Unit, onOidcLogin: () -> Unit = {}, onForgotPa
     var hasServer by remember { mutableStateOf(SessionManager.hasServer) }
     var username by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
+    var totp by remember { mutableStateOf("") }
+    var needTotp by remember { mutableStateOf(false) }
     var showPassword by remember { mutableStateOf(false) }
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf(SessionManager.consumeLogoutReason()) }
@@ -67,9 +69,12 @@ fun LoginScreen(onLoggedIn: () -> Unit, onOidcLogin: () -> Unit = {}, onForgotPa
         loading = true
         error = null
         scope.launch {
-            val result = SessionManager.login(username.trim(), password)
+            val result = SessionManager.login(username.trim(), password, if (needTotp) totp.trim() else null)
             loading = false
-            result.onSuccess { onLoggedIn() }.onFailure { error = friendlyError(it) }
+            result.onSuccess { onLoggedIn() }.onFailure {
+                if (it.message == "two-factor code required") needTotp = true
+                else { error = friendlyError(it); if (needTotp) totp = "" }
+            }
         }
     }
 
@@ -187,11 +192,23 @@ fun LoginScreen(onLoggedIn: () -> Unit, onOidcLogin: () -> Unit = {}, onForgotPa
                                 keyboardActions = KeyboardActions(onDone = { signIn() }),
                                 modifier = Modifier.fillMaxWidth(),
                             )
+                            if (needTotp) {
+                                Spacer(Modifier.height(12.dp))
+                                OutlinedTextField(
+                                    value = totp, onValueChange = { totp = it.filter(Char::isDigit).take(6); error = null },
+                                    label = { Text("Authenticator code") }, singleLine = true,
+                                    leadingIcon = { Icon(Icons.Default.Shield, null) },
+                                    shape = MaterialTheme.shapes.medium,
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword, imeAction = ImeAction.Done),
+                                    keyboardActions = KeyboardActions(onDone = { signIn() }),
+                                    modifier = Modifier.fillMaxWidth(),
+                                )
+                            }
                             ErrorText(error)
                             if (resetEnabled) {
                                 TextButton(onClick = onForgotPassword, modifier = Modifier.align(Alignment.End)) { Text("Forgot password?") }
                             } else Spacer(Modifier.height(16.dp))
-                            PrimaryButton("Sign in", enabled = username.isNotBlank() && password.isNotBlank(), busy = loading, onClick = { signIn() })
+                            PrimaryButton("Sign in", enabled = username.isNotBlank() && password.isNotBlank() && (!needTotp || totp.length == 6), busy = loading, onClick = { signIn() })
                             oidcLabel?.let { label ->
                                 Row(Modifier.padding(vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
                                     HorizontalDivider(Modifier.weight(1f), color = MaterialTheme.colorScheme.outlineVariant)
