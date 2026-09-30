@@ -1,6 +1,9 @@
 package com.videocall.mobile.net
 
 import android.content.Context
+import android.content.SharedPreferences
+import androidx.security.crypto.EncryptedSharedPreferences
+import androidx.security.crypto.MasterKey
 import okhttp3.Cookie
 import okhttp3.CookieJar
 import okhttp3.HttpUrl
@@ -12,7 +15,28 @@ import okhttp3.HttpUrl
  * plenty for a single-server client; no need for a real cookie database.
  */
 class PersistentCookieJar(context: Context) : CookieJar {
-    private val prefs = context.applicationContext.getSharedPreferences("vc_cookies", Context.MODE_PRIVATE)
+    // The session cookie is a bearer credential: keep it in Keystore-backed
+    // encrypted storage. Falls back to plain prefs only if the keystore is
+    // unusable on a device, and moves any older plain-text cookies across.
+    private val prefs: SharedPreferences = run {
+        val app = context.applicationContext
+        val plain = app.getSharedPreferences("vc_cookies", Context.MODE_PRIVATE)
+        val enc = runCatching {
+            EncryptedSharedPreferences.create(
+                app, "vc_cookies_enc",
+                MasterKey.Builder(app).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build(),
+                EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
+            )
+        }.getOrNull()
+        if (enc == null) plain else {
+            if (plain.all.isNotEmpty()) {
+                enc.edit().apply { for ((k, v) in plain.all) (v as? String)?.let { putString(k, it) } }.apply()
+                plain.edit().clear().apply()
+            }
+            enc
+        }
+    }
     private val store = mutableMapOf<String, MutableList<Cookie>>()
 
     init {

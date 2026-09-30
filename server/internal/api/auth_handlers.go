@@ -11,6 +11,7 @@ import (
 type loginRequest struct {
 	Username string `json:"username"`
 	Password string `json:"password"`
+	TOTPCode string `json:"totp_code"`
 }
 
 func (a *API) handleLogin(w http.ResponseWriter, r *http.Request) {
@@ -57,31 +58,27 @@ func (a *API) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusForbidden, "This account is suspended. Please contact your administrator.")
 		return
 	}
+	// Second factor: checked after the password so a wrong password never
+	// reveals whether an account has 2FA. Wrong codes stay counted by the
+	// limiter (Reserve above), so they can't be brute-forced.
+	if user.TOTPSecret != "" {
+		if req.TOTPCode == "" {
+			writeErr(w, http.StatusUnauthorized, "two-factor code required")
+			return
+		}
+		if !auth.VerifyTOTP(user.TOTPSecret, req.TOTPCode, time.Now()) {
+			a.auditAnon(r, req.Username, "login_failed", "bad two-factor code")
+			writeErr(w, http.StatusUnauthorized, "invalid two-factor code")
+			return
+		}
+	}
 	a.limiter.Success(key)
 	a.ipLimiter.Refund(ip)
 
-	ttl := time.Duration(a.settings.Get().SessionTTLHours) * time.Hour
-	sessionID, token, err := auth.MintSession(a.cfg.JWTSecret, user.ID, user.Role, ttl)
-	if err != nil {
+	if err := a.startSession(w, r, user); err != nil {
 		writeErr(w, http.StatusInternalServerError, "could not create session")
 		return
 	}
-	if err := a.db.CreateSession(sessionID, user.ID, auth.HashToken(token), time.Now().Add(ttl)); err != nil {
-		writeErr(w, http.StatusInternalServerError, "could not persist session")
-		return
-	}
-	isSecure := a.isSecureRequest(r)
-
-	http.SetCookie(w, &http.Cookie{
-		Name:     auth.CookieName,
-		Value:    token,
-		Path:     "/",
-		HttpOnly: true,
-		SameSite: http.SameSiteLaxMode,
-		Secure:   isSecure,
-		MaxAge:   int(ttl.Seconds()),
-	})
-	auth.EnsureCSRFCookie(w, r, isSecure)
 	if err := a.db.WriteAudit(&user.ID, user.Username, "login", "user", &user.ID, "", RealIP(r, a.settings.Get().TrustProxy)); err != nil && a.log != nil {
 		a.log.Warn("write audit entry", "action", "login", "err", err)
 	}

@@ -8,6 +8,8 @@ import type {
   IceServer,
   Message,
   PrivateRoom,
+  SessionInfo,
+  ConvoPref,
   SettingView,
   User,
 } from "./types";
@@ -112,11 +114,22 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  login: (username: string, password: string) =>
+  login: (username: string, password: string, totpCode?: string) =>
     req<User>("/api/login", {
       method: "POST",
-      body: JSON.stringify({ username, password }),
+      body: JSON.stringify({ username, password, totp_code: totpCode }),
     }),
+  sessions: () => req<SessionInfo[]>("/api/users/me/sessions"),
+  revokeSession: (id: string) => req<{ ok: boolean }>(`/api/users/me/sessions/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  revokeOtherSessions: () => req<{ ok: boolean }>("/api/users/me/sessions/revoke-others", { method: "POST" }),
+  totpSetup: () => req<{ secret: string; uri: string }>("/api/users/me/totp/setup", { method: "POST" }),
+  totpEnable: (secret: string, code: string) =>
+    req<{ ok: boolean }>("/api/users/me/totp/enable", { method: "POST", body: JSON.stringify({ secret, code }) }),
+  totpDisable: (password: string) =>
+    req<{ ok: boolean }>("/api/users/me/totp/disable", { method: "POST", body: JSON.stringify({ password }) }),
+  setStatusText: (text: string) => req<{ text: string }>("/api/users/me/status-text", { method: "PUT", body: JSON.stringify({ text }) }),
+  convoPrefs: () => req<ConvoPref[] | null>("/api/conversations/prefs").then((p) => p ?? []),
+  setConvoPref: (p: ConvoPref) => req<ConvoPref>("/api/conversations/prefs", { method: "PUT", body: JSON.stringify(p) }),
   logout: () => req<{ ok: boolean }>("/api/logout", { method: "POST" }),
   me: () => req<User>("/api/me"),
   userPreferences: () => req<UserPreferences>("/api/users/me/preferences"),
@@ -187,11 +200,20 @@ export const api = {
   recentConversations: () =>
     req<{ dms: Message[] | null; groups: Message[] | null }>("/api/conversations/recent").then((r) => ({ dms: r.dms ?? [], groups: r.groups ?? [] })),
   groups: () => req<Group[] | null>("/api/groups").then((g) => g ?? []),
-  createGroup: (name: string, memberIDs: number[]) =>
+  createGroup: (name: string, memberIDs: number[], isPublic = false) =>
     req<Group>("/api/groups", {
       method: "POST",
-      body: JSON.stringify({ name, member_ids: memberIDs }),
+      body: JSON.stringify({ name, member_ids: memberIDs, public: isPublic }),
     }),
+  publicGroups: () => req<Group[] | null>("/api/groups/public").then((g) => g ?? []),
+  joinGroup: (id: number) => req<Group>(`/api/groups/${id}/join`, { method: "POST" }),
+  setGroupPublic: (id: number, isPublic: boolean) =>
+    req<Group>(`/api/groups/${id}`, { method: "PATCH", body: JSON.stringify({ public: isPublic }) }),
+  adminGroups: () => req<Group[] | null>("/api/admin/groups").then((g) => g ?? []),
+  thread: (rootID: number) => req<Message[] | null>(`/api/threads/${rootID}`).then((m) => m ?? []),
+  blockedUsers: () => req<number[] | null>("/api/users/me/blocked").then((b) => b ?? []),
+  blockUser: (id: number) => req<{ ok: boolean }>(`/api/users/${id}/block`, { method: "POST" }),
+  unblockUser: (id: number) => req<{ ok: boolean }>(`/api/users/${id}/block`, { method: "DELETE" }),
   deleteGroup: (id: number) =>
     req<{ ok: boolean }>(`/api/groups/${id}`, { method: "DELETE" }),
   renameGroup: (id: number, name: string) =>
@@ -239,7 +261,7 @@ export const api = {
   calls: (limit = 50) =>
     req<Call[] | null>(`/api/calls?limit=${limit}`).then((c) => c ?? []),
 
-  createRoom: (body: { name: string; passcode?: string; require_approval: boolean; invited_user_ids: number[] }) =>
+  createRoom: (body: { name: string; passcode?: string; require_approval: boolean; invited_user_ids: number[]; scheduled_at?: string }) =>
     req<PrivateRoom>("/api/rooms", { method: "POST", body: JSON.stringify(body) }),
   myRooms: () => req<PrivateRoom[] | null>("/api/rooms").then((r) => r ?? []),
   getRoom: (id: string) => req<PrivateRoom>(`/api/rooms/${encodeURIComponent(id)}`),

@@ -40,6 +40,7 @@ export default function Rooms() {
   const [passcode, setPasscode] = useState("");
   const [requireApproval, setRequireApproval] = useState(false);
   const [invited, setInvited] = useState<number[]>([]);
+  const [scheduledAt, setScheduledAt] = useState(""); // <input type="datetime-local"> value, local time
   const [memberSearch, setMemberSearch] = useState("");
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
@@ -82,8 +83,9 @@ export default function Rooms() {
     setCreateError(null);
     setCreating(true);
     try {
-      await api.createRoom({ name: name.trim(), passcode: passcode.trim() || undefined, require_approval: requireApproval, invited_user_ids: invited });
+      await api.createRoom({ name: name.trim(), passcode: passcode.trim() || undefined, require_approval: requireApproval, invited_user_ids: invited, scheduled_at: scheduledAt ? new Date(scheduledAt).toISOString() : undefined });
       setShowCreate(false);
+      setScheduledAt("");
       setName(""); setPasscode(""); setRequireApproval(false); setInvited([]); setMemberSearch("");
       loadRooms();
     } catch (err) {
@@ -219,18 +221,24 @@ export default function Rooms() {
                   {room.require_passcode && <span title="Passcode required" className="text-amber-500"><Lock className="h-3 w-3" /></span>}
                   {room.require_approval && <span title="Approval required" className="text-brand"><ShieldCheck className="h-3 w-3" /></span>}
                 </div>
+                {(room.scheduled_at || !room.is_owner) && (
+                  <p className="text-xs text-brand mt-1 font-medium">
+                    {room.scheduled_at ? `Scheduled · ${new Date(room.scheduled_at).toLocaleString([], { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}` : ""}
+                    {!room.is_owner ? `${room.scheduled_at ? " · " : ""}Invited by ${room.owner?.display_name ?? "someone"}` : ""}
+                  </p>
+                )}
               </div>
               <button onClick={() => void doJoin(room)} className="h-10 px-3.5 rounded-xl bg-brand hover:bg-brand-hover text-white text-xs font-semibold flex items-center gap-1.5 shrink-0 active:scale-95 transition cursor-pointer shadow-md">
-                <Video className="h-3.5 w-3.5" /> Start
+                <Video className="h-3.5 w-3.5" /> {room.is_owner ? "Start" : "Join"}
               </button>
-              <button
+              {room.is_owner && <button
                 onClick={() => { setDeleteError(null); setDeleteTarget(room); }}
                 className="h-10 w-10 rounded-xl hover:bg-rose-50 dark:hover:bg-rose-950/40 text-zinc-500 hover:text-rose-600 dark:hover:text-rose-400 flex items-center justify-center shrink-0 transition cursor-pointer"
                 title="Delete room"
                 aria-label={`Delete ${room.name}`}
               >
                 <Trash2 className="h-4 w-4" />
-              </button>
+              </button>}
             </div>
           ))}
         </section>
@@ -242,6 +250,12 @@ export default function Rooms() {
           <div>
             <label htmlFor="room-name" className="block text-xs font-semibold text-zinc-500 mb-1">Room Name</label>
             <input id="room-name" className={inputCls} placeholder={`${me.display_name}'s room`} value={name} onChange={(e) => setName(e.target.value)} autoFocus />
+          </div>
+
+          <div>
+            <label htmlFor="room-when" className="block text-xs font-semibold text-zinc-500 mb-1">Schedule for later (optional)</label>
+            <input id="room-when" type="datetime-local" className={inputCls} value={scheduledAt} min={new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16)} onChange={(e) => setScheduledAt(e.target.value)} />
+            <p className="text-xs text-zinc-400 mt-1">Invited people will see it in their Rooms list with the start time.</p>
           </div>
 
           <div>

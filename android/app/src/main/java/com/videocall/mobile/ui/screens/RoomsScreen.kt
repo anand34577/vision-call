@@ -209,6 +209,19 @@ private fun RoomCard(room: PrivateRoom, onStart: () -> Unit, onShare: () -> Unit
                 }
                 FilledIconButton(onClick = onStart) { Icon(Icons.Default.Videocam, "Start") }
             }
+            if (room.scheduled_at.isNotBlank() || !room.is_owner) {
+                val whenText = runCatching {
+                    java.time.format.DateTimeFormatter.ofPattern("EEE d MMM, HH:mm")
+                        .format(java.time.Instant.parse(room.scheduled_at).atZone(java.time.ZoneId.systemDefault()))
+                }.getOrNull()
+                Text(
+                    listOfNotNull(
+                        whenText?.let { "Scheduled · $it" },
+                        if (!room.is_owner) "Invited by ${room.owner?.display_name ?: "someone"}" else null,
+                    ).joinToString(" · "),
+                    style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 10.dp),
+                )
+            }
             if (room.require_passcode || room.require_approval) {
                 Row(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     if (room.require_passcode) Chip(Icons.Default.Lock, "Passcode")
@@ -251,7 +264,39 @@ private fun CreateRoomSheet(onDismiss: () -> Unit, onCreated: (PrivateRoom) -> U
     val invited = remember { mutableStateListOf<Long>() }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+    var scheduled by remember { mutableStateOf<java.time.LocalDateTime?>(null) }
+    var showDatePicker by remember { mutableStateOf(false) }
+    var pickedDate by remember { mutableStateOf<java.time.LocalDate?>(null) }
     LaunchedEffect(Unit) { users = runCatching { SessionManager.api.users() }.getOrDefault(emptyList()).filter { it.id != me?.id && !it.disabled } }
+
+    if (showDatePicker) {
+        val dateState = rememberDatePickerState(initialSelectedDateMillis = System.currentTimeMillis())
+        DatePickerDialog(
+            onDismissRequest = { showDatePicker = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    dateState.selectedDateMillis?.let { pickedDate = java.time.Instant.ofEpochMilli(it).atZone(java.time.ZoneOffset.UTC).toLocalDate() }
+                    showDatePicker = false
+                }) { Text("Next") }
+            },
+            dismissButton = { TextButton(onClick = { showDatePicker = false }) { Text("Cancel") } },
+        ) { DatePicker(dateState) }
+    }
+    pickedDate?.let { date ->
+        val timeState = rememberTimePickerState(initialHour = (java.time.LocalTime.now().hour + 1) % 24, initialMinute = 0, is24Hour = true)
+        AlertDialog(
+            onDismissRequest = { pickedDate = null },
+            title = { Text("Start time") },
+            text = { TimePicker(timeState) },
+            confirmButton = {
+                TextButton(onClick = {
+                    scheduled = java.time.LocalDateTime.of(date, java.time.LocalTime.of(timeState.hour, timeState.minute))
+                    pickedDate = null
+                }) { Text("Set") }
+            },
+            dismissButton = { TextButton(onClick = { pickedDate = null }) { Text("Cancel") } },
+        )
+    }
 
     ModalBottomSheet(onDismissRequest = onDismiss, containerColor = MaterialTheme.colorScheme.surfaceContainer) {
         Column(Modifier.padding(horizontal = 20.dp).padding(bottom = 24.dp)) {
@@ -264,6 +309,17 @@ private fun CreateRoomSheet(onDismiss: () -> Unit, onCreated: (PrivateRoom) -> U
                 visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.medium,
             )
             Spacer(Modifier.height(6.dp))
+            Row(Modifier.fillMaxWidth().clickable { showDatePicker = true }.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Schedule for later", style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        scheduled?.format(java.time.format.DateTimeFormatter.ofPattern("EEE d MMM, HH:mm")) ?: "Starts now — invited people see it in Rooms",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                if (scheduled != null) IconButton(onClick = { scheduled = null }) { Icon(Icons.Default.Close, "Clear time") }
+                else Icon(Icons.Default.Schedule, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
             Row(Modifier.fillMaxWidth().clickable { approval = !approval }.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text("Host approval", style = MaterialTheme.typography.bodyLarge)
@@ -301,7 +357,7 @@ private fun CreateRoomSheet(onDismiss: () -> Unit, onCreated: (PrivateRoom) -> U
                 busy = true
                 error = null
                 scope.launch {
-                    runCatching { SessionManager.api.createRoom(name.trim(), passcode.trim().ifBlank { null }, approval, invited.toList()) }
+                    runCatching { SessionManager.api.createRoom(name.trim(), passcode.trim().ifBlank { null }, approval, invited.toList(), scheduled?.atZone(java.time.ZoneId.systemDefault())?.toInstant()?.toString()) }
                         .onSuccess(onCreated)
                         .onFailure { error = it.message ?: "Couldn't create the room" }
                     busy = false

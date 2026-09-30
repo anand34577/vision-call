@@ -12,6 +12,9 @@ export interface User {
   deleted: boolean;
   created_at: string;
   oidc_linked: boolean;
+  status_text?: string;
+  must_change_password?: boolean;
+  totp_enabled?: boolean;
   status: "online" | "away" | "dnd" | "offline";
   preferences?: UserPreferences;
 }
@@ -66,6 +69,12 @@ export interface Message {
   is_encrypted: boolean;
   enc_iv?: string | null;
   enc_keys?: string | null;
+  mentions?: number[];
+  /** Set on a reply that lives inside another message's thread. */
+  thread_root_id?: number | null;
+  /** On a thread's first message: how many replies it has. */
+  thread_count?: number;
+  poll?: Poll;
   reply_to?: MessagePreview;
   reactions?: MessageReaction[];
   sender?: UserBrief;
@@ -78,7 +87,25 @@ export interface Message {
   clientID?: string;
 }
 
+export interface PollOption {
+  id: number;
+  text: string;
+  /** ids of the people who voted for it */
+  votes: number[];
+}
+
+export interface Poll {
+  id: number;
+  question: string;
+  multi: boolean;
+  closed: boolean;
+  options: PollOption[];
+}
+
 export interface Group {
+  /** Public groups are channels anyone can find and join. */
+  public?: boolean;
+  member_count?: number;
   id: number;
   name: string;
   topic: string;
@@ -176,10 +203,28 @@ export interface PrivateRoom {
   require_approval: boolean;
   is_owner: boolean;
   created_at: string;
+  /** Start time of a scheduled meeting (ISO), empty for an instant room. */
+  scheduled_at?: string;
 }
 
 export interface BackupSnapshot {
   name: string;
   size: number;
   created_at: string;
+}
+
+export interface SessionInfo {
+  id: string;
+  user_agent: string;
+  ip: string;
+  created_at: string;
+  last_seen: string;
+  current: boolean;
+}
+
+export interface ConvoPref {
+  kind: "dm" | "group";
+  target_id: number;
+  muted: boolean;
+  archived: boolean;
 }

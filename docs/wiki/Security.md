@@ -7,7 +7,10 @@ Vision Call is built for private networks: an office LAN, a home network or a VP
 - Only admins create accounts; nobody can sign up on their own.
 - Passwords are stored with argon2id, a slow, salted hash designed for passwords.
 - Repeated wrong passwords are rate-limited: 5 failures in 15 minutes per account and address.
-- Sign-ins are kept in `httpOnly`, `SameSite=Lax` cookies that page scripts can't read. They expire after 12 hours by default (`SESSION_TTL_HOURS`).
+- Sign-ins are kept in `httpOnly`, `SameSite=Lax` cookies that page scripts can't read. A device stays signed in for 30 days after its last use by default (`SESSION_TTL_HOURS`; the timer restarts each time the app is used).
+- The same account can be signed in on several devices at once (phone and laptop). **Settings > Status & Security** lists them and can sign any of them out remotely.
+- Two-step verification (an authenticator app such as Aegis or Google Authenticator; standard TOTP, no online service involved) can be turned on per account in Settings.
+- When an admin creates an account or sets its password, that person must choose their own password at first sign-in.
 - Suspending, removing or changing the password of an account signs it out everywhere immediately, even mid-call.
 - Single sign-on through OpenID Connect is available, see [Configuration](Configuration#single-sign-on).
 

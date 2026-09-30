@@ -1,14 +1,15 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { MessageSquareText, Plus, Search, Star, Video, Loader2, MessageSquare, Paperclip, Lock, X } from "lucide-react";
+import { Archive, BellOff, Hash, MessageSquareText, Plus, Search, Star, Video, Loader2, MessageSquare, Paperclip, Lock, X } from "lucide-react";
 import { useAuth } from "../store/auth";
 import { useDirectory } from "../store/directory";
 import { useChats } from "../store/chats";
 import { useCalls } from "../store/calls";
 import { api } from "../lib/api";
-import { Avatar, EmptyState, Modal, PresenceDot, btnPrimary, inputCls } from "../components/ui";
+import { Avatar, EmptyState, Modal, PresenceDot, Switch, btnPrimary, btnSecondary, inputCls } from "../components/ui";
 import { fmtDay, fmtTime } from "../lib/util";
 import ChatPanel from "../components/ChatPanel";
-import type { Message } from "../lib/types";
+import type { Group, Message } from "../lib/types";
+import { searchEncryptedLocally } from "../lib/localSearch";
 
 export default function Chats() {
   const me = useAuth((s) => s.me)!;
@@ -23,7 +24,11 @@ export default function Chats() {
     messagesByDm,
     messagesByGroup,
     fetchSaved,
+    convoPrefs,
+    decryptedContent,
   } = useChats();
+  const [showArchived, setShowArchived] = useState(false);
+  const archivedCount = Object.values(convoPrefs).filter((p) => p.archived).length;
   const { activeGroupRooms, startGroupCall } = useCalls();
 
   const [search, setSearch] = useState("");
@@ -34,6 +39,11 @@ export default function Chats() {
   const [mobilePanel, setMobilePanel] = useState(false);
   const [groupError, setGroupError] = useState<string | null>(null);
   const [creatingGroup, setCreatingGroup] = useState(false);
+  const [groupPublic, setGroupPublic] = useState(false);
+  const [showChannels, setShowChannels] = useState(false);
+  const [channels, setChannels] = useState<Group[] | null>(null);
+  const [channelError, setChannelError] = useState<string | null>(null);
+  const [joiningID, setJoiningID] = useState<number | null>(null);
 
   const [showSearch, setShowSearch] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -59,6 +69,7 @@ export default function Chats() {
     () =>
       users
         .filter((u) => u.id !== me.id && !u.disabled)
+        .filter((u) => !!convoPrefs[`dm:${u.id}`]?.archived === showArchived)
         .filter((u) =>
           search
             ? u.display_name.toLowerCase().includes(search.toLowerCase()) ||
@@ -72,12 +83,13 @@ export default function Chats() {
           return lastTime("dm", b.id) - lastTime("dm", a.id);
         }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [users, me.id, search, unread, messagesByDm],
+    [users, me.id, search, unread, messagesByDm, convoPrefs, showArchived],
   );
 
   const filteredGroups = useMemo(
     () =>
       groups
+        .filter((g) => !!convoPrefs[`g:${g.id}`]?.archived === showArchived)
         .filter((g) => (search ? g.name.toLowerCase().includes(search.toLowerCase()) : true))
         .sort((a, b) => {
           const ua = unread[`g:${a.id}`] ?? 0;
@@ -86,7 +98,7 @@ export default function Chats() {
           return lastTime("g", b.id) - lastTime("g", a.id);
         }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [groups, search, unread, messagesByGroup],
+    [groups, search, unread, messagesByGroup, convoPrefs, showArchived],
   );
 
   const modalFilteredUsers = useMemo(
@@ -108,8 +120,9 @@ export default function Chats() {
     setGroupError(null);
     setCreatingGroup(true);
     try {
-      await api.createGroup(groupName.trim(), members);
+      await api.createGroup(groupName.trim(), members, groupPublic);
       setGroupName("");
+      setGroupPublic(false);
       setMembers([]);
       setShowNewGroup(false);
       void fetchGroups();
@@ -128,6 +141,7 @@ export default function Chats() {
       return;
     }
     setSearching(true);
+    const signal = { cancelled: false };
     const t = setTimeout(() => {
       api
         .searchMessages({
@@ -139,12 +153,45 @@ export default function Chats() {
           until: searchUntil ? new Date(searchUntil + "T23:59:59").toISOString() : undefined,
           hasFile: searchHasFile || undefined,
         })
-        .then((r) => { setSearchResults(r); setSearchError(null); })
+        .then((r) => {
+          setSearchResults(r);
+          setSearchError(null);
+          // The server can't see inside encrypted chats: also look through
+          // recent ones on this device, and merge any hits in.
+          if (q.length >= 2) {
+            void searchEncryptedLocally(q, me.id, signal).then((local) => {
+              if (signal.cancelled || local.length === 0) return;
+              setSearchResults((cur) => [...cur, ...local.filter((l) => !cur.some((c) => c.id === l.id))].sort((a, b) => Date.parse(b.sent_at) - Date.parse(a.sent_at)));
+            }).catch(() => {});
+          }
+        })
         .catch((err) => setSearchError(err?.message ?? "Search failed"))
         .finally(() => setSearching(false));
     }, 300);
-    return () => clearTimeout(t);
-  }, [searchQuery, searchSender, searchSince, searchUntil, searchHasFile]);
+    return () => { signal.cancelled = true; clearTimeout(t); };
+  }, [searchQuery, searchSender, searchSince, searchUntil, searchHasFile, me.id]);
+
+  const openChannels = () => {
+    setShowChannels(true);
+    setChannels(null);
+    setChannelError(null);
+    api.publicGroups().then(setChannels).catch((err) => setChannelError(err?.message ?? "Could not load channels"));
+  };
+
+  const joinChannel = async (g: Group) => {
+    setJoiningID(g.id);
+    setChannelError(null);
+    try {
+      await api.joinGroup(g.id);
+      await fetchGroups();
+      setShowChannels(false);
+      openGroup(g.id);
+      setMobilePanel(true);
+    } catch (err: any) {
+      setChannelError(err?.message ?? "Could not join channel");
+    }
+    setJoiningID(null);
+  };
 
   const openSearchResult = (m: Message) => {
     if (m.group_id) {
@@ -171,6 +218,11 @@ export default function Chats() {
     const m = lastOf(kind, id);
     return m ? Date.parse(m.sent_at) || 0 : 0;
   }
+
+  // One-line preview of a chat's latest message: deleted and encrypted ones
+  // must not show their raw (empty / ciphertext) content.
+  const previewOf = (m: Message) =>
+    m.deleted_at ? "Message deleted" : m.is_encrypted ? (decryptedContent[m.id] ?? "Encrypted message") : m.content || m.file?.name || "file";
 
   const hasDraft = (key: string) => {
     try {
@@ -218,6 +270,25 @@ export default function Chats() {
             >
               <MessageSquareText className="h-4 w-4" />
             </button>
+            <button
+              onClick={openChannels}
+              title="Browse channels"
+              aria-label="Browse channels"
+              className="h-10 w-10 rounded-xl hover:bg-surface-hover text-ink-secondary hover:text-ink flex items-center justify-center shrink-0 transition cursor-pointer border border-transparent hover:border-line"
+            >
+              <Hash className="h-4 w-4" />
+            </button>
+            {(archivedCount > 0 || showArchived) && (
+              <button
+                onClick={() => setShowArchived((v) => !v)}
+                title={showArchived ? "Back to chats" : `Archived chats (${archivedCount})`}
+                aria-label={showArchived ? "Back to chats" : `Archived chats (${archivedCount})`}
+                aria-pressed={showArchived}
+                className={`h-10 w-10 rounded-xl hover:bg-surface-hover flex items-center justify-center shrink-0 transition cursor-pointer border ${showArchived ? "border-brand/40 text-brand" : "border-transparent text-ink-secondary hover:text-ink hover:border-line"}`}
+              >
+                <Archive className="h-4 w-4" />
+              </button>
+            )}
             <button
               onClick={() => {
                 setShowSaved(true);
@@ -288,6 +359,8 @@ export default function Chats() {
                       <p className={`text-sm truncate ${isSelected ? "font-bold text-brand" : "font-semibold text-ink"}`}>
                         {g.name}
                       </p>
+                      {g.public && <Hash className="h-3 w-3 text-ink-muted shrink-0" aria-label="Public channel" />}
+                      {convoPrefs[`g:${g.id}`]?.muted && <BellOff className="h-3 w-3 text-ink-muted shrink-0" aria-label="Muted" />}
                       {hasActiveCall && (
                         <span className="bg-emerald-600 text-white text-[9px] font-bold px-1.5 py-px rounded-full uppercase tracking-wider shadow-xs">
                           Live
@@ -301,7 +374,7 @@ export default function Chats() {
                         <>
                           <span className="font-medium text-ink-secondary">{last.sender?.display_name ?? ""}:</span>
                           {!last.content && last.file && <Paperclip className="h-3 w-3 shrink-0" />}
-                          <span className="truncate">{last.content || last.file?.name || "file"}</span>
+                          <span className="truncate">{previewOf(last)}</span>
                         </>
                       ) : (
                         `${g.members.length} members`
@@ -363,7 +436,7 @@ export default function Chats() {
                     ) : (
                       <>
                         {last && !last.content && last.file && <Paperclip className="h-3 w-3 shrink-0" />}
-                        <span className="truncate">{last ? (last.content || last.file?.name || "file") : `@${u.username}`}</span>
+                        <span className="truncate">{last ? previewOf(last) : `@${u.username}`}</span>
                       </>
                     )}
                   </p>
@@ -395,6 +468,29 @@ export default function Chats() {
           </div>
         )}
       </div>
+
+      {/* Browse channels */}
+      <Modal open={showChannels} onClose={() => setShowChannels(false)} title="Browse channels">
+        <div className="space-y-3">
+          {channelError && <p className="text-sm text-rose-600 dark:text-rose-400" role="alert">{channelError}</p>}
+          {channels === null && !channelError && <p className="text-sm text-zinc-400 flex items-center gap-2"><Loader2 className="h-4 w-4 animate-spin" /> Loading…</p>}
+          {channels?.length === 0 && <p className="text-sm text-zinc-400">There are no other public channels to join right now. Create one with the + button and switch on "Public channel".</p>}
+          <ul className="max-h-80 overflow-y-auto divide-y divide-zinc-200 dark:divide-zinc-800">
+            {channels?.map((g) => (
+              <li key={g.id} className="flex items-center gap-3 py-2.5">
+                <Avatar name={g.name} id={g.id} fileId={g.avatar_file_id} />
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold truncate flex items-center gap-1"><Hash className="h-3.5 w-3.5 shrink-0" />{g.name}</p>
+                  <p className="text-xs text-zinc-500 truncate">{g.member_count ?? 0} members{g.topic ? ` · ${g.topic}` : ""}</p>
+                </div>
+                <button className={btnSecondary} disabled={joiningID === g.id} onClick={() => void joinChannel(g)}>
+                  {joiningID === g.id ? <Loader2 className="h-4 w-4 animate-spin" /> : null} Join
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </Modal>
 
       {/* New Group Modal */}
       <Modal open={showNewGroup} onClose={() => setShowNewGroup(false)} title="New Group">
@@ -449,6 +545,14 @@ export default function Chats() {
                 <p className="text-xs text-zinc-400 text-center py-4">No users found</p>
               )}
             </div>
+          </div>
+
+          <div className="flex items-center justify-between py-1">
+            <div>
+              <p className="text-sm font-medium flex items-center gap-1.5"><Hash className="h-4 w-4" /> Public channel</p>
+              <p className="text-xs text-zinc-400">Anyone on this server can find it and join. Turn off to keep it invite-only.</p>
+            </div>
+            <Switch checked={groupPublic} onChange={setGroupPublic} label="Public channel" />
           </div>
 
           {groupError && <p className="text-sm text-rose-600 dark:text-rose-400" role="alert">{groupError}</p>}

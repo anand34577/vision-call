@@ -1,8 +1,10 @@
 package api
 
 import (
+	"crypto/subtle"
 	"fmt"
 	"io/fs"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -117,6 +119,10 @@ func (a *API) handleAdminStats(w http.ResponseWriter, r *http.Request) {
 // Hand-written rather than pulling in client_golang: a handful of gauges
 // don't need a metrics library, just the format Prometheus already expects.
 func (a *API) handleMetrics(w http.ResponseWriter, r *http.Request) {
+	if !a.metricsAllowed(r) {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
 	var b strings.Builder
 	gauge := func(name, help string, value float64) {
 		fmt.Fprintf(&b, "# HELP %s %s\n# TYPE %s gauge\n%s %v\n", name, help, name, name, value)
@@ -160,3 +166,15 @@ func (a *API) handleDownloadCert(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, certPath)
 }
 
+// metricsAllowed guards /metrics: a bearer token when METRICS_TOKEN is set,
+// otherwise only loopback and private-network callers (so a server exposed to
+// the internet doesn't publish usage numbers to everyone).
+func (a *API) metricsAllowed(r *http.Request) bool {
+	sv := a.settings.Get()
+	if sv.MetricsToken != "" {
+		got := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+		return subtle.ConstantTimeCompare([]byte(got), []byte(sv.MetricsToken)) == 1
+	}
+	ip := net.ParseIP(RealIP(r, sv.TrustProxy))
+	return ip != nil && (ip.IsLoopback() || ip.IsPrivate())
+}

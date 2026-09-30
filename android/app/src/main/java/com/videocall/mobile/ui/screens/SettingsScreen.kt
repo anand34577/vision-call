@@ -64,6 +64,9 @@ fun SettingsScreen(
     val followSystem by ThemeState.followSystem.collectAsState()
     var showEdit by remember { mutableStateOf(false) }
     var showPassword by remember { mutableStateOf(false) }
+    var showStatusText by remember { mutableStateOf(false) }
+    var showDevices by remember { mutableStateOf(false) }
+    var showTwoFactor by remember { mutableStateOf(false) }
     var confirmLogout by remember { mutableStateOf(false) }
     var uploadingAvatar by remember { mutableStateOf(false) }
     val snackbar = remember { SnackbarHostState() }
@@ -222,6 +225,12 @@ fun SettingsScreen(
                 SettingsRow(Icons.Default.Person, "Edit profile", "Display name and email", onClick = { showEdit = true })
                 HorizontalDivider(Modifier.padding(start = 64.dp), color = MaterialTheme.colorScheme.outlineVariant)
                 SettingsRow(Icons.Default.Password, "Change password", "Signs you out everywhere", tint = VcColor.Online, onClick = { showPassword = true })
+                HorizontalDivider(Modifier.padding(start = 64.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                SettingsRow(Icons.Default.EditNote, "Status message", me?.status_text?.ifBlank { null } ?: "Tell people what you're up to", onClick = { showStatusText = true })
+                HorizontalDivider(Modifier.padding(start = 64.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                SettingsRow(Icons.Default.Shield, "Two-step verification", if (me?.totp_enabled == true) "On" else "Off — add an authenticator app", tint = VcColor.Online, onClick = { showTwoFactor = true })
+                HorizontalDivider(Modifier.padding(start = 64.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                SettingsRow(Icons.Default.Devices, "Signed-in devices", "See and sign out other devices", tint = VcColor.Away, onClick = { showDevices = true })
                 if (me?.oidc_linked == true) {
                     HorizontalDivider(Modifier.padding(start = 64.dp), color = MaterialTheme.colorScheme.outlineVariant)
                     SettingsRow(Icons.Default.LinkOff, "Unlink single sign-on", tint = VcColor.Away, onClick = {
@@ -285,6 +294,9 @@ fun SettingsScreen(
 
     if (showEdit) EditProfileSheet(onDismiss = { showEdit = false })
     if (showPassword) ChangePasswordSheet(onDismiss = { showPassword = false })
+    if (showStatusText) StatusTextSheet(onDismiss = { showStatusText = false })
+    if (showDevices) DevicesSheet(onDismiss = { showDevices = false })
+    if (showTwoFactor) TwoFactorSheet(onDismiss = { showTwoFactor = false })
     if (confirmLogout) {
         ConfirmDialog(
             title = "Sign out?",

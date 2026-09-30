@@ -153,3 +153,19 @@ func TestDeleteOrphanFiles(t *testing.T) {
 		t.Errorf("quota should drop to the 2 kept files, got %d", used)
 	}
 }
+
+// A literal % or _ in a search must match itself, not act as a wildcard.
+func TestSearchTreatsWildcardsLiterally(t *testing.T) {
+	d := openTestDB(t)
+	a, _ := d.CreateUser("a", "A", "h", "user")
+	b, _ := d.CreateUser("b", "B", "h", "user")
+	_, _ = d.InsertMessage(a.ID, &b.ID, nil, nil, nil, "100% done")
+	_, _ = d.InsertMessage(a.ID, &b.ID, nil, nil, nil, "hello there")
+	got, err := d.SearchMessages(a.ID, SearchFilter{Query: "0%"})
+	if err != nil || len(got) != 1 {
+		t.Fatalf("got %d results, err %v; want 1", len(got), err)
+	}
+	if got, _ := d.SearchMessages(a.ID, SearchFilter{Query: "h_llo"}); len(got) != 0 {
+		t.Fatal("underscore acted as wildcard")
+	}
+}

@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"time"
 
 	"visioncall/internal/db"
 )
@@ -20,7 +21,7 @@ const userKey ctxKey = 1
 // process can serve both a TLS and a plain-HTTP listener at once (the
 // HTTP_ADDR companion port), so "is this connection secure" isn't a
 // server-wide constant.
-func RequireAuth(dbh *db.DB, secret []byte, isSecure func(*http.Request) bool) func(http.Handler) http.Handler {
+func RequireAuth(dbh *db.DB, secret []byte, isSecure func(*http.Request) bool, slide func() time.Duration) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			cookie, err := r.Cookie(CookieName)
@@ -31,7 +32,7 @@ func RequireAuth(dbh *db.DB, secret []byte, isSecure func(*http.Request) bool) f
 			// ValidateSession already rejects disabled users (see jwt.go) - the
 			// user returned here is never disabled, so there is no second
 			// check to make here.
-			user, err := ValidateSession(dbh, secret, cookie.Value)
+			user, err := ValidateSession(dbh, secret, cookie.Value, slide())
 			if err != nil {
 				http.Error(w, "unauthorized", http.StatusUnauthorized)
 				return

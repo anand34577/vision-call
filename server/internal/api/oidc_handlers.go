@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -157,7 +156,7 @@ func (a *API) finishOIDCLink(w http.ResponseWriter, r *http.Request, result *oid
 		oidcRedirectResult(w, r, "settings", "sso-error=session_expired")
 		return
 	}
-	user, err := auth.ValidateSession(a.db, a.cfg.JWTSecret, cookie.Value)
+	user, err := auth.ValidateSession(a.db, a.cfg.JWTSecret, cookie.Value, a.sessionTTL())
 	if err != nil || user.ID != result.LinkUserID {
 		oidcRedirectResult(w, r, "settings", "sso-error=session_mismatch")
 		return
@@ -197,22 +196,10 @@ func (a *API) finishOIDCLogin(w http.ResponseWriter, r *http.Request, result *oi
 		return
 	}
 
-	ttl := time.Duration(a.settings.Get().SessionTTLHours) * time.Hour
-	sessionID, token, err := auth.MintSession(a.cfg.JWTSecret, user.ID, user.Role, ttl)
-	if err != nil {
+	if err := a.startSession(w, r, user); err != nil {
 		oidcRedirectResult(w, r, "", "sso-error=session_failed")
 		return
 	}
-	if err := a.db.CreateSession(sessionID, user.ID, auth.HashToken(token), time.Now().Add(ttl)); err != nil {
-		oidcRedirectResult(w, r, "", "sso-error=session_failed")
-		return
-	}
-	isSecure := a.isSecureRequest(r)
-	http.SetCookie(w, &http.Cookie{
-		Name: auth.CookieName, Value: token, Path: "/", HttpOnly: true,
-		SameSite: http.SameSiteLaxMode, Secure: isSecure, MaxAge: int(ttl.Seconds()),
-	})
-	auth.EnsureCSRFCookie(w, r, isSecure)
 	if err := a.db.WriteAudit(&user.ID, user.Username, "login", "user", &user.ID, "via OIDC", RealIP(r, a.settings.Get().TrustProxy)); err != nil && a.log != nil {
 		a.log.Warn("write audit entry", "action", "login", "err", err)
 	}

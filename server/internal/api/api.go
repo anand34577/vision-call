@@ -29,6 +29,9 @@ type PresenceProvider interface {
 	OnlineCount() int
 	ActiveCalls() int
 	KickUser(userID int64, reason string)
+	KickSession(userID int64, sessionID, reason string)
+	KickOtherSessions(userID int64, keepSessionID, reason string)
+	SendToUser(userID int64, typ string, data any) bool
 	DirectoryChanged()
 	AccountUpdated(userID int64)
 	EvictFromGroupRoom(groupID, targetID int64) bool
@@ -180,10 +183,18 @@ func (a *API) Router() http.Handler {
 	r.Get("/oidc/callback", a.handleOIDCCallback)
 
 	r.Group(func(r chi.Router) {
-		r.Use(auth.RequireAuth(a.db, a.cfg.JWTSecret, a.isSecureRequest))
+		r.Use(auth.RequireAuth(a.db, a.cfg.JWTSecret, a.isSecureRequest, a.sessionTTL))
 		r.Use(auth.RequireCSRF)
+		r.Use(requirePasswordChange)
 
 		r.Post("/logout", a.handleLogout)
+		r.Get("/users/me/sessions", a.handleListSessions)
+		r.Delete("/users/me/sessions/{id}", a.handleRevokeSession)
+		r.Post("/users/me/sessions/revoke-others", a.handleRevokeOtherSessions)
+		r.Post("/users/me/totp/setup", a.handleTOTPSetup)
+		r.Post("/users/me/totp/enable", a.handleTOTPEnable)
+		r.Post("/users/me/totp/disable", a.handleTOTPDisable)
+		r.Put("/users/me/status-text", a.handleSetStatusText)
 		r.Get("/me", a.handleMe)
 		r.Patch("/users/me", a.handleUpdateSelf)
 		r.Get("/users/me/preferences", a.handleGetPreferences)
@@ -204,6 +215,7 @@ func (a *API) Router() http.Handler {
 			r.Delete("/users/{id}", a.handleDeleteUser)
 			r.Post("/users/{id}/sign-out", a.handleSignOutUser)
 			r.Get("/admin/stats", a.handleAdminStats)
+			r.Get("/admin/groups", a.handleAdminListGroups)
 			r.Get("/admin/audit", a.handleListAudit)
 			r.Get("/admin/backups", a.handleListBackups)
 			r.Post("/admin/backups", a.handleCreateSnapshot)
@@ -219,6 +231,15 @@ func (a *API) Router() http.Handler {
 
 		r.Get("/messages/{userID}", a.handleDirectHistory)
 		r.Get("/conversations/recent", a.handleRecentConversations)
+		r.Get("/unread", a.handleUnreadSummary)
+		r.Get("/conversations/prefs", a.handleListConvoPrefs)
+		r.Put("/conversations/prefs", a.handleSetConvoPref)
+		r.Get("/groups/public", a.handleListPublicGroups)
+		r.Post("/groups/{id}/join", a.handleJoinGroup)
+		r.Get("/threads/{id}", a.handleThread)
+		r.Get("/users/me/blocked", a.handleListBlocked)
+		r.Post("/users/{id}/block", a.handleBlockUser)
+		r.Delete("/users/{id}/block", a.handleUnblockUser)
 		r.Get("/groups", a.handleListGroups)
 		r.Post("/groups", a.handleCreateGroup)
 		r.Patch("/groups/{id}", a.handleRenameGroup)
@@ -311,4 +332,29 @@ func (a *API) decorateUsers(users []*db.User) {
 			u.Status = "offline"
 		}
 	}
+}
+
+// sessionTTL is the sliding inactivity timeout for sessions.
+func (a *API) sessionTTL() time.Duration {
+	return time.Duration(a.settings.Get().SessionTTLHours) * time.Hour
+}
+
+// startSession creates a session row and sets the session + CSRF cookies.
+func (a *API) startSession(w http.ResponseWriter, r *http.Request, user *db.User) error {
+	ttl := a.sessionTTL()
+	sessionID, token, err := auth.MintSession(a.cfg.JWTSecret, user.ID, user.Role)
+	if err != nil {
+		return err
+	}
+	ua := r.UserAgent()
+	if err := a.db.CreateSession(sessionID, user.ID, auth.HashToken(token), time.Now().Add(ttl), ua, RealIP(r, a.settings.Get().TrustProxy)); err != nil {
+		return err
+	}
+	isSecure := a.isSecureRequest(r)
+	http.SetCookie(w, &http.Cookie{
+		Name: auth.CookieName, Value: token, Path: "/", HttpOnly: true,
+		SameSite: http.SameSiteLaxMode, Secure: isSecure, MaxAge: int(auth.TokenLifetime.Seconds()),
+	})
+	auth.EnsureCSRFCookie(w, r, isSecure)
+	return nil
 }

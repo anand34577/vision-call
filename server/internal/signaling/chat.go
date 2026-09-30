@@ -2,6 +2,7 @@ package signaling
 
 import (
 	"encoding/json"
+	"strconv"
 	"strings"
 	"time"
 
@@ -19,6 +20,17 @@ type sendMessagePayload struct {
 	Content     string `json:"content"`
 	FileID      *int64 `json:"file_id"`
 	ReplyToID   *int64 `json:"reply_to_id"`
+	// Mentions are the user ids @-mentioned; sent as metadata because the
+	// server can't read end-to-end encrypted text.
+	Mentions []int64 `json:"mentions"`
+	// ThreadRootID posts this message as a reply inside another message's thread.
+	ThreadRootID *int64 `json:"thread_root_id"`
+	// Poll turns the message into a poll (Content should carry the question).
+	Poll *struct {
+		Question string   `json:"question"`
+		Options  []string `json:"options"`
+		Multi    bool     `json:"multi"`
+	} `json:"poll"`
 	// E2E: when Encrypted, Content is ciphertext and EncIV/EncKeys carry
 	// what a recipient device needs to decrypt it. The server stores these
 	// opaquely — see migration 008.
@@ -31,10 +43,66 @@ type sendMessagePayload struct {
 // ciphertext blob — the one branch point between the two, shared by the DM
 // and group send paths.
 func (h *Hub) insertMessage(senderID int64, recipientID, groupID, fileID *int64, p *sendMessagePayload) (*dbMessage, error) {
+	var msg *dbMessage
+	var err error
 	if p.Encrypted {
-		return h.db.InsertEncryptedMessage(senderID, recipientID, groupID, fileID, p.ReplyToID, p.Content, p.EncIV, p.EncKeys)
+		msg, err = h.db.InsertEncryptedMessage(senderID, recipientID, groupID, fileID, p.ReplyToID, p.Content, p.EncIV, p.EncKeys)
+	} else {
+		msg, err = h.db.InsertMessage(senderID, recipientID, groupID, fileID, p.ReplyToID, p.Content)
 	}
-	return h.db.InsertMessage(senderID, recipientID, groupID, fileID, p.ReplyToID, p.Content)
+	if err != nil {
+		return nil, err
+	}
+	if p.ThreadRootID != nil {
+		if h.db.SetThreadRoot(msg.ID, *p.ThreadRootID) == nil {
+			msg.ThreadRootID = p.ThreadRootID
+		}
+	}
+	if p.Poll != nil {
+		if err := h.db.CreatePoll(msg.ID, p.Content, db.CleanPollOptions(p.Poll.Options), p.Poll.Multi); err != nil {
+			_, _ = h.db.DeleteMessageAsModerator(msg.ID)
+			return nil, err
+		}
+	}
+	if ids := h.validMentions(senderID, recipientID, groupID, p.Mentions); len(ids) > 0 {
+		if h.db.SetMessageMentions(msg.ID, ids) == nil {
+			msg.Mentions = ids
+		}
+	}
+	return msg, nil
+}
+
+// validMentions keeps only ids that are actually part of the conversation
+// (the DM peer, or group members), so a mention can't be used to ping people
+// who can't see the message.
+func (h *Hub) validMentions(senderID int64, recipientID, groupID *int64, ids []int64) []int64 {
+	if len(ids) == 0 {
+		return nil
+	}
+	if len(ids) > 20 {
+		ids = ids[:20]
+	}
+	allowed := map[int64]bool{}
+	if recipientID != nil {
+		allowed[*recipientID] = true
+	} else if groupID != nil {
+		members, err := h.db.GroupMemberIDs(*groupID)
+		if err != nil {
+			return nil
+		}
+		for _, m := range members {
+			allowed[m] = true
+		}
+	}
+	out := make([]int64, 0, len(ids))
+	seen := map[int64]bool{}
+	for _, id := range ids {
+		if id != senderID && allowed[id] && !seen[id] {
+			seen[id] = true
+			out = append(out, id)
+		}
+	}
+	return out
 }
 
 // canAttachFile allows attaching your own upload, or re-attaching (forwarding)
@@ -96,6 +164,17 @@ func (h *Hub) enrichBatch(msgs []*dbMessage) {
 			m.Reactions = reactions[m.ID]
 		}
 	}
+	if counts, err := h.db.ThreadCounts(msgIDs); err == nil {
+		for _, m := range msgs {
+			m.ThreadCount = counts[m.ID]
+		}
+	}
+	if polls, err := h.db.PollsForMessages(msgIDs); err == nil {
+		for _, m := range msgs {
+			m.Poll = polls[m.ID]
+		}
+	}
+
 }
 
 func (h *Hub) enrich(m *dbMessage) {
@@ -184,6 +263,28 @@ func (c *Client) handleMessageSend(env *Envelope) {
 		c.sendMessageError(p.ClientID, "invalid reply target")
 		return
 	}
+	if p.ThreadRootID != nil {
+		root, err := c.hub.db.GetMessage(*p.ThreadRootID)
+		if err != nil || root.ThreadRootID != nil || !c.hub.replyTargetValid(*p.ThreadRootID, p.RecipientID, p.GroupID, c.user.ID) {
+			c.sendMessageError(p.ClientID, "invalid thread")
+			return
+		}
+	}
+	if p.Poll != nil {
+		opts := db.CleanPollOptions(p.Poll.Options)
+		q := strings.TrimSpace(p.Content)
+		if p.Encrypted || q == "" || len([]rune(q)) > 300 || len(opts) < 2 || len(opts) > 10 || p.ThreadRootID != nil {
+			c.sendMessageError(p.ClientID, "a poll needs a question and 2-10 options")
+			return
+		}
+		for _, o := range opts {
+			if len([]rune(o)) > 100 {
+				c.sendMessageError(p.ClientID, "poll options must be 100 characters or fewer")
+				return
+			}
+		}
+		p.Poll.Options = opts
+	}
 
 	if p.GroupID != nil {
 		c.sendGroupMessage(&p)
@@ -196,6 +297,10 @@ func (c *Client) handleMessageSend(env *Envelope) {
 	}
 	if recipient.Disabled {
 		c.sendMessageError(p.ClientID, "recipient is disabled")
+		return
+	}
+	if c.hub.db.IsBlockedEitherWay(c.user.ID, recipient.ID) {
+		c.sendMessageError(p.ClientID, "this person can't receive your messages")
 		return
 	}
 	if p.FileID != nil && !c.canAttachFile(*p.FileID) {
@@ -218,6 +323,7 @@ func (c *Client) handleMessageSend(env *Envelope) {
 	}
 	// sender ack carries the canonical message (with delivery state)
 	c.Send("message:sent", map[string]any{"client_id": p.ClientID, "message": msg})
+	c.hub.sendToOthers(c, "message:sent", map[string]any{"client_id": "sync-" + strconv.FormatInt(msg.ID, 10), "message": msg})
 }
 
 func (c *Client) sendGroupMessage(p *sendMessagePayload) {
@@ -248,6 +354,7 @@ func (c *Client) sendGroupMessage(p *sendMessagePayload) {
 		c.hub.sendToUser(uid, "message:new", map[string]any{"message": msg})
 	}
 	c.Send("message:sent", map[string]any{"client_id": p.ClientID, "message": msg})
+	c.hub.sendToOthers(c, "message:sent", map[string]any{"client_id": "sync-" + strconv.FormatInt(msg.ID, 10), "message": msg})
 }
 
 // handleMessageDelete soft-deletes a message the sender owns and tells
@@ -261,12 +368,33 @@ func (c *Client) handleMessageDelete(env *Envelope) {
 		return
 	}
 	msg, err := c.hub.db.DeleteMessage(p.ID, c.user.ID)
+	if err != nil && c.canModerate(p.ID) {
+		msg, err = c.hub.db.DeleteMessageAsModerator(p.ID)
+	}
 	if err != nil {
 		c.Send("error", map[string]string{"message": "could not delete message"})
 		return
 	}
 	payload := map[string]any{"id": msg.ID, "sender_id": msg.SenderID, "recipient_id": msg.RecipientID, "group_id": msg.GroupID}
 	c.broadcastToConversationRaw(msg, "message:deleted", payload)
+}
+
+// canModerate reports whether c may delete someone else's message: a site
+// admin anywhere, or the owner/admin of the group it was posted in. DMs have
+// no moderator.
+func (c *Client) canModerate(msgID int64) bool {
+	msg, err := c.hub.db.GetMessage(msgID)
+	if err != nil || msg.DeletedAt != nil {
+		return false
+	}
+	if msg.GroupID == nil {
+		return false
+	}
+	if c.user.Role == "admin" {
+		return true
+	}
+	role, err := c.hub.db.GroupMemberRole(*msg.GroupID, c.user.ID)
+	return err == nil && (role == "owner" || role == "admin")
 }
 
 // handleMessageEdit updates a message's text in place. Only the sender may
@@ -482,6 +610,7 @@ func (c *Client) handleRead(env *Envelope) {
 			c.log.Error("message: mark read", "peer_id", *p.PeerID, "err", err)
 		} else {
 			c.hub.sendToUser(*p.PeerID, "message:read", map[string]any{"from": c.user.ID})
+			c.hub.syncUnread(c)
 		}
 		return
 	}
@@ -490,6 +619,11 @@ func (c *Client) handleRead(env *Envelope) {
 			if err := c.hub.db.MarkGroupRead(*p.GroupID, c.user.ID); err != nil {
 				c.log.Error("message: mark group read", "group_id", *p.GroupID, "err", err)
 			}
+			var lastRead int64
+			if states, err := c.hub.db.GroupReadStates(*p.GroupID); err == nil {
+				lastRead = states[c.user.ID]
+			}
+			c.hub.syncUnread(c)
 			if memberIDs, err := c.hub.db.GroupMemberIDs(*p.GroupID); err != nil {
 				c.log.Error("message: load group members for read", "group_id", *p.GroupID, "err", err)
 			} else {
@@ -498,10 +632,72 @@ func (c *Client) handleRead(env *Envelope) {
 						// A distinct event: clients treat "message:read" as a DM
 						// read receipt from `from`, so reusing it here marked all
 						// their DMs to this user as read.
-						c.hub.sendToUser(uid, "message:group-read", map[string]any{"from": c.user.ID, "group_id": *p.GroupID})
+						c.hub.sendToUser(uid, "message:group-read", map[string]any{"from": c.user.ID, "group_id": *p.GroupID, "last_read_id": lastRead})
 					}
 				}
 			}
 		}
 	}
+}
+
+// handlePollVote toggles the caller's vote and tells everyone in the chat.
+func (c *Client) handlePollVote(env *Envelope) {
+	var p struct {
+		PollID   int64 `json:"poll_id"`
+		OptionID int64 `json:"option_id"`
+	}
+	if json.Unmarshal(env.Data, &p) != nil {
+		return
+	}
+	c.withPollMessage(p.PollID, func(msg *dbMessage) {
+		if err := c.hub.db.VotePoll(p.PollID, p.OptionID, c.user.ID); err != nil {
+			if err == db.ErrPollClosed {
+				c.Send("error", map[string]string{"message": "this poll is closed"})
+			}
+			return
+		}
+		c.broadcastPoll(msg)
+	})
+}
+
+// handlePollClose ends voting; only the poll's author (or a site admin) may.
+func (c *Client) handlePollClose(env *Envelope) {
+	var p struct {
+		PollID int64 `json:"poll_id"`
+	}
+	if json.Unmarshal(env.Data, &p) != nil {
+		return
+	}
+	c.withPollMessage(p.PollID, func(msg *dbMessage) {
+		if msg.SenderID != c.user.ID && c.user.Role != "admin" {
+			c.Send("error", map[string]string{"message": "only the poll's author can close it"})
+			return
+		}
+		if c.hub.db.ClosePoll(p.PollID) == nil {
+			c.broadcastPoll(msg)
+		}
+	})
+}
+
+func (c *Client) withPollMessage(pollID int64, fn func(*dbMessage)) {
+	mid, err := c.hub.db.PollMessageID(pollID)
+	if err != nil {
+		return
+	}
+	msg, err := c.hub.db.GetMessage(mid)
+	if err != nil || msg.DeletedAt != nil || !c.canSeeMessage(msg) {
+		return
+	}
+	fn(msg)
+}
+
+func (c *Client) broadcastPoll(msg *dbMessage) {
+	polls, err := c.hub.db.PollsForMessages([]int64{msg.ID})
+	if err != nil || polls[msg.ID] == nil {
+		return
+	}
+	c.broadcastToConversationRaw(msg, "poll:updated", map[string]any{
+		"message_id": msg.ID, "sender_id": msg.SenderID, "recipient_id": msg.RecipientID,
+		"group_id": msg.GroupID, "poll": polls[msg.ID],
+	})
 }

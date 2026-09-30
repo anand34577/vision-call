@@ -42,6 +42,9 @@ private data class ConvoItem(
     val last: Message?,
     val unread: Int,
     val isGroup: Boolean,
+    val muted: Boolean = false,
+    val archived: Boolean = false,
+    val isChannel: Boolean = false,
 )
 
 /** The small icon in front of a preview line: photo, attachment or lock. */
@@ -83,6 +86,9 @@ fun ChatsListScreen(
     val groups by ChatRepository.groups.collectAsState()
     val unread by ChatRepository.unread.collectAsState()
     val messages by ChatRepository.messages.collectAsState()
+    val prefs by ChatRepository.prefs.collectAsState()
+    val directoryVersion by SessionManager.directoryVersion.collectAsState()
+    var showArchived by remember { mutableStateOf(false) }
     val typing by ChatRepository.typingIn(Convo.Dm(0)).collectAsState()
     val presence by SessionManager.presence.collectAsState()
     val me by SessionManager.me.collectAsState()
@@ -90,6 +96,7 @@ fun ChatsListScreen(
     var loadError by remember { mutableStateOf<String?>(null) }
     var refreshing by remember { mutableStateOf(false) }
     var showNewGroup by remember { mutableStateOf(false) }
+    var showChannels by remember { mutableStateOf(false) }
     var query by remember { mutableStateOf("") }
 
     suspend fun refresh() {
@@ -104,32 +111,42 @@ fun ChatsListScreen(
         refresh()
         loading = false
     }
+    // An admin added, renamed or removed someone: reload the people list.
+    LaunchedEffect(directoryVersion) {
+        if (directoryVersion > 0) runCatching { SessionManager.api.users() }.onSuccess { users = it }
+    }
 
     val usersById = users.associateBy { it.id }
-    val items = remember(users, groups, messages, unread, presence, me) {
+    val items = remember(users, groups, messages, unread, presence, me, prefs) {
         val out = mutableListOf<ConvoItem>()
         groups.forEach { g ->
             val c = Convo.GroupChat(g.id)
-            out += ConvoItem(c, g.name, g.avatar_file_id, null, messages[c.key]?.lastOrNull(), unread[c.key] ?: 0, true)
+            out += ConvoItem(c, g.name, g.avatar_file_id, null, messages[c.key]?.lastOrNull(), unread[c.key] ?: 0, true, prefs[c.key]?.muted == true, prefs[c.key]?.archived == true, g.public)
         }
         users.filter { it.id != me?.id && !it.disabled }.forEach { u ->
             val c = Convo.Dm(u.id)
             val last = messages[c.key]?.lastOrNull()
             val count = unread[c.key] ?: 0
             if (last != null || count > 0) {
-                out += ConvoItem(c, u.display_name, u.avatar_file_id, presence[u.id] ?: u.status, last, count, false)
+                out += ConvoItem(c, u.display_name, u.avatar_file_id, presence[u.id] ?: u.status, last, count, false, prefs[c.key]?.muted == true, prefs[c.key]?.archived == true)
             }
         }
         out.sortedWith(compareByDescending<ConvoItem> { it.last?.sent_at ?: "" }.thenBy { it.title.lowercase() })
     }
     val q = query.trim()
-    val visible = if (q.isBlank()) items else items.filter { it.title.contains(q, true) }
+    val archivedCount = items.count { it.archived }
+    val inView = items.filter { it.archived == showArchived }
+    val visible = if (q.isBlank()) inView else inView.filter { it.title.contains(q, true) }
     val online = users.filter { it.id != me?.id && !it.disabled && (presence[it.id] ?: it.status) != "offline" }
 
     Column(Modifier.fillMaxSize().padding(bottom = contentPadding.calculateBottomPadding())) {
-        ScreenHeader("Chats") {
+        ScreenHeader(if (showArchived) "Archived" else "Chats") {
+            if (archivedCount > 0 || showArchived) {
+                HeaderAction(if (showArchived) Icons.Default.Inbox else Icons.Default.Archive, if (showArchived) "Back to chats" else "Archived chats ($archivedCount)") { showArchived = !showArchived }
+            }
             HeaderAction(Icons.Default.ManageSearch, "Search messages", onOpenSearch)
             HeaderAction(Icons.Outlined.BookmarkBorder, "Saved messages", onOpenSaved)
+            HeaderAction(Icons.Default.Tag, "Browse channels") { showChannels = true }
             HeaderAction(Icons.Default.GroupAdd, "New group") { showNewGroup = true }
         }
         SearchField(query, { query = it }, "Search chats")
@@ -155,7 +172,7 @@ fun ChatsListScreen(
             modifier = Modifier.fillMaxSize(),
         ) {
             LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 16.dp)) {
-                if (q.isBlank() && online.isNotEmpty()) {
+                if (q.isBlank() && online.isNotEmpty() && !showArchived) {
                     item { SectionHeader("Online now") }
                     item {
                         LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -202,6 +219,9 @@ fun ChatsListScreen(
         }
     }
 
+    if (showChannels) {
+        ChannelBrowserSheet(onDismiss = { showChannels = false }, onJoined = { gid -> onOpenGroup(gid) })
+    }
     if (showNewGroup) {
         NewGroupSheet(
             users = users.filter { it.id != me?.id && !it.disabled },
@@ -226,12 +246,14 @@ private fun ConversationRow(item: ConvoItem, myId: Long?, typingName: String?, o
         Column(Modifier.weight(1f).padding(start = 14.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (item.isGroup) {
-                    Icon(Icons.Default.Groups, null, Modifier.size(16.dp).padding(end = 4.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Icon(if (item.isChannel) Icons.Default.Tag else Icons.Default.Groups, null, Modifier.size(16.dp).padding(end = 4.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 Text(
                     item.title, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier.weight(1f, fill = false),
                 )
+                if (item.muted) Icon(Icons.Default.NotificationsOff, "Muted", Modifier.size(14.dp).padding(start = 4.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.weight(1f))
                 Text(
                     shortTimestamp(item.last?.sent_at),
                     style = MaterialTheme.typography.labelMedium,
@@ -254,7 +276,7 @@ private fun ConversationRow(item: ConvoItem, myId: Long?, typingName: String?, o
                 }
                 Text(
                     when {
-                        typingName != null -> if (item.isGroup) "$typingName is typing…" else "typing…"
+                        typingName != null -> if (item.isGroup) "$typingName ${if (typingName.contains(", ")) "are" else "is"} typing…" else "typing…"
                         last == null -> if (item.isGroup) "No messages yet — say hi" else ""
                         else -> previewText(last, myId, item.isGroup)
                     },
@@ -282,6 +304,7 @@ private fun NewGroupSheet(users: List<User>, onDismiss: () -> Unit, onCreated: (
     var filter by remember { mutableStateOf("") }
     val selected = remember { mutableStateListOf<Long>() }
     var busy by remember { mutableStateOf(false) }
+    var isPublic by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     ModalBottomSheet(onDismissRequest = { if (!busy) onDismiss() }, containerColor = MaterialTheme.colorScheme.surfaceContainer) {
         Column(Modifier.fillMaxHeight(0.85f).padding(bottom = 16.dp)) {
@@ -312,6 +335,13 @@ private fun NewGroupSheet(users: List<User>, onDismiss: () -> Unit, onCreated: (
                     }
                 }
             }
+            Row(Modifier.fillMaxWidth().clickable { isPublic = !isPublic }.padding(horizontal = 20.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Public channel", style = MaterialTheme.typography.bodyLarge)
+                    Text("Anyone on this server can find and join it", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Switch(isPublic, { isPublic = it })
+            }
             error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 20.dp)) }
             PrimaryButton(
                 "Create group",
@@ -322,7 +352,7 @@ private fun NewGroupSheet(users: List<User>, onDismiss: () -> Unit, onCreated: (
                     busy = true
                     error = null
                     scope.launch {
-                        runCatching { SessionManager.api.createGroup(name.trim(), selected.toList()) }
+                        runCatching { SessionManager.api.createGroup(name.trim(), selected.toList(), isPublic) }
                             .onSuccess { onCreated(it.id) }
                             .onFailure { error = it.message ?: "Couldn't create the group" }
                         busy = false

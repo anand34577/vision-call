@@ -148,6 +148,10 @@ func (a *API) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	user, err := a.db.CreateUser(req.Username, req.DisplayName, hash, req.Role)
+	if err == nil {
+		// An admin picked this password, so its owner must replace it.
+		_ = a.db.SetMustChangePassword(user.ID, true)
+	}
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "could not create user")
 		return
@@ -280,6 +284,7 @@ func (a *API) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 		}
 		if req.Password != nil {
 			_ = a.db.DeletePasswordResetTokensForUser(id)
+			_ = a.db.SetMustChangePassword(id, true)
 		}
 		a.hub.KickUser(id, reason)
 	} else if req.Role != nil || req.DisplayName != nil {

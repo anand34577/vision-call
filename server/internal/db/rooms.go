@@ -16,15 +16,17 @@ type PrivateRoom struct {
 	PasscodeHash    *string `json:"-"`
 	RequireApproval bool    `json:"require_approval"`
 	CreatedAt       string  `json:"created_at"`
+	// ScheduledAt is when a scheduled meeting starts (RFC3339 UTC); empty for an instant room.
+	ScheduledAt string `json:"scheduled_at"`
 }
 
-const privateRoomCols = `id, name, owner_id, passcode_hash, require_approval, created_at`
+const privateRoomCols = `id, name, owner_id, passcode_hash, require_approval, created_at, scheduled_at`
 
 func scanPrivateRoom(row interface{ Scan(...any) error }) (*PrivateRoom, error) {
 	pr := &PrivateRoom{}
 	var passcode sql.NullString
 	var requireApproval int
-	if err := row.Scan(&pr.ID, &pr.Name, &pr.OwnerID, &passcode, &requireApproval, &pr.CreatedAt); err != nil {
+	if err := row.Scan(&pr.ID, &pr.Name, &pr.OwnerID, &passcode, &requireApproval, &pr.CreatedAt, &pr.ScheduledAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
 		}
@@ -38,7 +40,7 @@ func scanPrivateRoom(row interface{ Scan(...any) error }) (*PrivateRoom, error) 
 // CreatePrivateRoom persists a new room and its (possibly empty) invite
 // list in one transaction. id must already be a fresh, collision-checked
 // code — see api.generateRoomCode.
-func (d *DB) CreatePrivateRoom(id, name string, ownerID int64, passcodeHash *string, requireApproval bool, invitedUserIDs []int64) error {
+func (d *DB) CreatePrivateRoom(id, name string, ownerID int64, passcodeHash *string, requireApproval bool, invitedUserIDs []int64, scheduledAt string) error {
 	tx, err := d.Begin()
 	if err != nil {
 		return err
@@ -50,8 +52,8 @@ func (d *DB) CreatePrivateRoom(id, name string, ownerID int64, passcodeHash *str
 		approval = 1
 	}
 	if _, err := tx.Exec(
-		`INSERT INTO private_rooms (id, name, owner_id, passcode_hash, require_approval, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
-		id, name, ownerID, passcodeHash, approval, time.Now().UTC().Format(time.RFC3339),
+		`INSERT INTO private_rooms (id, name, owner_id, passcode_hash, require_approval, created_at, scheduled_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		id, name, ownerID, passcodeHash, approval, time.Now().UTC().Format(time.RFC3339), scheduledAt,
 	); err != nil {
 		return err
 	}
@@ -71,9 +73,10 @@ func (d *DB) GetPrivateRoom(id string) (*PrivateRoom, error) {
 	return scanPrivateRoom(row)
 }
 
-// ListMyPrivateRooms returns rooms the given user owns, newest first.
-func (d *DB) ListMyPrivateRooms(ownerID int64) ([]*PrivateRoom, error) {
-	rows, err := d.Query(`SELECT `+privateRoomCols+` FROM private_rooms WHERE owner_id = ? ORDER BY created_at DESC`, ownerID)
+// ListMyPrivateRooms returns rooms the user owns or has been invited to, newest first.
+func (d *DB) ListMyPrivateRooms(userID int64) ([]*PrivateRoom, error) {
+	rows, err := d.Query(`SELECT `+privateRoomCols+` FROM private_rooms
+		WHERE owner_id = ? OR id IN (SELECT room_id FROM private_room_invites WHERE user_id = ?) ORDER BY created_at DESC`, userID, userID)
 	if err != nil {
 		return nil, err
 	}

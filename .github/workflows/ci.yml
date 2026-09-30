@@ -41,6 +41,15 @@ jobs:
       - name: go test -race
         working-directory: server
         run: go test -race ./...
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: end-to-end smoke test (multi-device sessions, 2FA, moderation)
+        working-directory: server
+        run: |
+          DISABLE_TLS=true HTTP_ADDR= LISTEN_ADDR=127.0.0.1:18080 DATA_DIR="$(mktemp -d)" BOOTSTRAP_ADMIN_PASSWORD='AdminPass123!' go run ./cmd/server &
+          for i in $(seq 1 60); do curl -sf http://127.0.0.1:18080/api/healthz && break; sleep 1; done
+          node ../scripts/e2e-sessions.mjs
 
   web:
     name: web (typecheck, build)
@@ -73,4 +82,7 @@ jobs:
       - name: Compile Kotlin
         working-directory: android
         run: ./gradlew compileDebugKotlin --no-daemon
+      - name: Build shrunk release (R8) so missing keep rules fail here, not on a phone
+        working-directory: android
+        run: ./gradlew assembleRelease --no-daemon
 

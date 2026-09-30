@@ -86,6 +86,11 @@ fun AppRoot() {
         return
     }
 
+    if (me?.must_change_password == true) {
+        ForcePasswordScreen()
+        return
+    }
+
     val nav = rememberNavController()
     val startDestination = remember { if (me != null) "home" else "login" }
 

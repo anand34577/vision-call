@@ -95,8 +95,20 @@ class Api(private val context: Context, val baseUrl: String) {
     }
 
     // ---- auth ----
-    suspend fun login(username: String, password: String): User =
-        exec("/api/login", "POST", jsonBody(mapOf("username" to username, "password" to password)), expectedUnauthenticated = true)
+    suspend fun login(username: String, password: String, totpCode: String? = null): User =
+        exec("/api/login", "POST", jsonBody(mapOf("username" to username, "password" to password, "totp_code" to totpCode)), expectedUnauthenticated = true)
+
+    suspend fun sessions(): List<SessionInfo> = exec<List<SessionInfo>?>("/api/users/me/sessions") ?: emptyList()
+    suspend fun revokeSession(id: String): ApiOk = exec("/api/users/me/sessions/${java.net.URLEncoder.encode(id, "UTF-8")}", "DELETE")
+    suspend fun revokeOtherSessions(): ApiOk = exec("/api/users/me/sessions/revoke-others", "POST")
+    suspend fun totpSetup(): TotpSetup = exec("/api/users/me/totp/setup", "POST")
+    suspend fun totpEnable(secret: String, code: String): ApiOk = exec("/api/users/me/totp/enable", "POST", jsonBody(mapOf("secret" to secret, "code" to code)))
+    suspend fun totpDisable(password: String): ApiOk = exec("/api/users/me/totp/disable", "POST", jsonBody(mapOf("password" to password)))
+    suspend fun setStatusText(text: String): Map<String, String> = exec("/api/users/me/status-text", "PUT", jsonBody(mapOf("text" to text)))
+    suspend fun unreadSummary(): Map<String, Int> = exec("/api/unread")
+    suspend fun convoPrefs(): List<ConvoPref> = exec<List<ConvoPref>?>("/api/conversations/prefs") ?: emptyList()
+    suspend fun setConvoPref(p: ConvoPref): ConvoPref =
+        exec("/api/conversations/prefs", "PUT", jsonBody(mapOf("kind" to p.kind, "target_id" to p.target_id, "muted" to p.muted, "archived" to p.archived)))
 
     suspend fun logout(): ApiOk = exec("/api/logout", "POST")
     suspend fun me(): User = exec("/api/me", expectedUnauthenticated = true)
@@ -144,8 +156,17 @@ class Api(private val context: Context, val baseUrl: String) {
 
     suspend fun groups(): List<Group> = exec<List<Group>?>("/api/groups") ?: emptyList()
 
-    suspend fun createGroup(name: String, memberIds: List<Long>): Group =
-        exec("/api/groups", "POST", jsonBody(mapOf("name" to name, "member_ids" to memberIds)))
+    suspend fun createGroup(name: String, memberIds: List<Long>, public: Boolean = false): Group =
+        exec("/api/groups", "POST", jsonBody(mapOf("name" to name, "member_ids" to memberIds, "public" to public)))
+
+    suspend fun publicGroups(): List<Group> = exec<List<Group>?>("/api/groups/public") ?: emptyList()
+    suspend fun joinGroup(groupId: Long): Group = exec("/api/groups/$groupId/join", "POST")
+    suspend fun setGroupPublic(groupId: Long, public: Boolean): Group =
+        exec("/api/groups/$groupId", "PATCH", jsonBody(mapOf("public" to public)))
+    suspend fun thread(rootId: Long): List<Message> = exec<List<Message>?>("/api/threads/$rootId") ?: emptyList()
+    suspend fun blockedUsers(): List<Long> = exec<List<Long>?>("/api/users/me/blocked") ?: emptyList()
+    suspend fun blockUser(id: Long): ApiOk = exec("/api/users/$id/block", "POST")
+    suspend fun unblockUser(id: Long): ApiOk = exec("/api/users/$id/block", "DELETE")
 
     suspend fun groupMessages(groupId: Long, before: Long? = null): List<Message> =
         exec<List<Message>?>("/api/groups/$groupId/messages" + (before?.let { "?before=$it&limit=50" } ?: "")) ?: emptyList()
@@ -191,8 +212,8 @@ class Api(private val context: Context, val baseUrl: String) {
         "$baseUrl/api/export?" + (groupId?.let { "group_id=$it" } ?: "peer_id=$peerId")
 
     // ---- private rooms ----
-    suspend fun createRoom(name: String, passcode: String? = null, requireApproval: Boolean = false, invitedUserIds: List<Long> = emptyList()): PrivateRoom =
-        exec("/api/rooms", "POST", jsonBody(mapOf("name" to name, "passcode" to passcode, "require_approval" to requireApproval, "invited_user_ids" to invitedUserIds)))
+    suspend fun createRoom(name: String, passcode: String? = null, requireApproval: Boolean = false, invitedUserIds: List<Long> = emptyList(), scheduledAt: String? = null): PrivateRoom =
+        exec("/api/rooms", "POST", jsonBody(mapOf("name" to name, "passcode" to passcode, "require_approval" to requireApproval, "invited_user_ids" to invitedUserIds, "scheduled_at" to scheduledAt)))
     suspend fun myRooms(): List<PrivateRoom> = exec<List<PrivateRoom>?>("/api/rooms") ?: emptyList()
     suspend fun getRoom(id: String): PrivateRoom = exec("/api/rooms/${java.net.URLEncoder.encode(id, "UTF-8")}")
     suspend fun deleteRoom(id: String): ApiOk = exec("/api/rooms/${java.net.URLEncoder.encode(id, "UTF-8")}", "DELETE")
@@ -237,6 +258,7 @@ class Api(private val context: Context, val baseUrl: String) {
 
     // ---- admin ----
     suspend fun adminStats(): AdminStats = exec("/api/admin/stats")
+    suspend fun adminGroups(): List<Group> = exec<List<Group>?>("/api/admin/groups") ?: emptyList()
     suspend fun createUser(username: String, displayName: String, password: String, role: String, email: String? = null): User =
         exec("/api/users", "POST", jsonBody(mapOf("username" to username, "display_name" to displayName, "password" to password, "role" to role, "email" to email)))
     suspend fun updateUser(id: Long, displayName: String? = null, role: String? = null, disabled: Boolean? = null, password: String? = null, email: String? = null): User =

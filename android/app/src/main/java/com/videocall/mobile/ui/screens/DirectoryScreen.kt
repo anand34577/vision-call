@@ -133,7 +133,7 @@ private fun PersonRow(user: User, status: String, onOpenDm: (Long) -> Unit) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.size(7.dp).clip(MaterialTheme.shapes.extraLarge).background(presenceColor(status)))
                 Text(
-                    " ${presenceLabel(status)} · @${user.username}", style = MaterialTheme.typography.bodySmall,
+                    " ${presenceLabel(status)} · @${user.username}" + (if (user.status_text.isNotBlank()) " · ${user.status_text}" else ""), style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis,
                 )
             }

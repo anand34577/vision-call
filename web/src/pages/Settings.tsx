@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { KeyBackupSection } from "../components/KeyBackup";
+import { SecuritySection } from "../components/SecuritySection";
 import { Camera, Volume2, Eye, EyeOff, CheckCircle2, XCircle, Trash2, Loader2, Palette, Check } from "lucide-react";
 import { api } from "../lib/api";
 import { useAuth } from "../store/auth";
@@ -723,6 +724,7 @@ export default function Settings() {
           )}
         </section>
 
+        <SecuritySection />
         <KeyBackupSection />
 
         {/* Change Password */}

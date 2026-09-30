@@ -6,12 +6,17 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.withContext
+import java.io.File
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.decodeFromJsonElement
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicLong
 import com.videocall.mobile.net.Group
+import com.videocall.mobile.net.ConvoPref
 import com.videocall.mobile.net.Message
 import com.videocall.mobile.net.json
 import com.videocall.mobile.net.long
@@ -43,7 +48,68 @@ object ChatRepository {
     private val _groups = MutableStateFlow<List<Group>>(emptyList())
     val groups: StateFlow<List<Group>> = _groups
 
-    private val _typing = MutableStateFlow<Map<String, String>>(emptyMap()) // convoKey -> "name is typing"
+    private val _typing = MutableStateFlow<Map<String, String>>(emptyMap()) // convoKey -> "Ann" or "Ann, Bo"
+    // convoKey -> userId -> (name, expiry). Tracked per person so two people
+    // typing both show, and one person's old timer can't clear a newer one.
+    private val typers = mutableMapOf<String, MutableMap<Long, Pair<String, Long>>>()
+
+    private fun publishTyping() {
+        val now = System.currentTimeMillis()
+        val out = mutableMapOf<String, String>()
+        val it = typers.entries.iterator()
+        while (it.hasNext()) {
+            val (k, m) = it.next()
+            m.values.removeAll { p -> p.second < now }
+            if (m.isEmpty()) it.remove() else out[k] = m.values.joinToString(", ") { p -> p.first }
+        }
+        _typing.value = out
+    }
+
+    // convoKey ("dm:5" / "g:3") -> mute/archive settings.
+    private val _prefs = MutableStateFlow<Map<String, ConvoPref>>(emptyMap())
+    val prefs: StateFlow<Map<String, ConvoPref>> = _prefs
+
+    // groupId -> userId -> id of the last message that person has read.
+    private val _groupReads = MutableStateFlow<Map<Long, Map<Long, Long>>>(emptyMap())
+    val groupReads: StateFlow<Map<Long, Map<Long, Long>>> = _groupReads
+
+    private fun prefKey(p: ConvoPref) = if (p.kind == "dm") "dm:${p.target_id}" else "g:${p.target_id}"
+
+    suspend fun loadPrefs() {
+        val list = runCatching { SessionManager.api.convoPrefs() }.getOrNull() ?: return
+        _prefs.value = list.associateBy { prefKey(it) }
+    }
+
+    fun setPref(convo: Convo, muted: Boolean? = null, archived: Boolean? = null) {
+        val cur = _prefs.value[convo.key]
+        val next = ConvoPref(
+            kind = if (convo is Convo.Dm) "dm" else "group",
+            target_id = when (convo) { is Convo.Dm -> convo.peerId; is Convo.GroupChat -> convo.groupId },
+            muted = muted ?: cur?.muted ?: false,
+            archived = archived ?: cur?.archived ?: false,
+        )
+        _prefs.value = _prefs.value + (convo.key to next)
+        scope.launch {
+            if (runCatching { SessionManager.api.setConvoPref(next) }.isFailure) {
+                _prefs.value = if (cur != null) _prefs.value + (convo.key to cur) else _prefs.value - convo.key
+            }
+        }
+    }
+
+    fun isMuted(key: String) = _prefs.value[key]?.muted == true
+
+    suspend fun loadGroupReads(groupId: Long) {
+        val r = runCatching { SessionManager.api.groupReadState(groupId) }.getOrNull() ?: return
+        _groupReads.value = _groupReads.value + (groupId to r.mapNotNull { (k, v) -> k.toLongOrNull()?.let { it to v } }.toMap())
+    }
+
+    /** ids of users @-mentioned in [text], resolved against the people directory. */
+    private fun mentionIds(text: String): List<Long> {
+        val users = SessionManager.users.value
+        return Regex("(?:^|\\s)@([a-zA-Z0-9._-]{2,32})").findAll(text)
+            .mapNotNull { m -> users.firstOrNull { it.username.equals(m.groupValues[1], true) }?.id }
+            .distinct().toList()
+    }
 
     private val _encryptedConvos = MutableStateFlow<Map<String, Boolean>>(emptyMap())
     val encryptedConvos: StateFlow<Map<String, Boolean>> = _encryptedConvos
@@ -82,10 +148,14 @@ object ChatRepository {
 
     /** Called once a session exists (login or resumed session). */
     fun onSignedIn() {
+        SessionManager.refreshUsers()
         scope.launch {
             if (::appContext.isInitialized) Crypto.ensureDeviceRegistered(appContext)
         }
-        scope.launch { loadGroups(); fetchRecent(); fetchSaved() }
+        // Show what was on screen last time straight away; the network then refreshes it.
+        loadDiskCache()
+        startCacheWriter()
+        scope.launch { loadGroups(); fetchRecent(); fetchSaved(); loadPrefs(); loadBlocked() }
     }
 
     /** Drops everything the previous account could see (shared devices). */
@@ -99,7 +169,12 @@ object ChatRepository {
         _encryptedConvos.value = emptyMap()
         _savedIds.value = emptySet()
         _hasMore.value = emptyMap()
+        _prefs.value = emptyMap()
+        _groupReads.value = emptyMap()
+        _blocked.value = emptySet()
+        typers.clear()
         activeConvo = null
+        deleteDiskCache()
     }
 
     fun isEncrypted(convo: Convo): Boolean = _encryptedConvos.value[convo.key] ?: false
@@ -141,8 +216,27 @@ object ChatRepository {
             scope.launch {
                 loadGroups()
                 fetchRecent()
+                loadPrefs()
                 activeConvo?.let { loadHistory(it) }
+                resendFailed()
             }
+        }
+        ws.on("group:changed") { _ -> scope.launch { loadGroups() } }
+        ws.on("poll:updated") { d ->
+            val id = d.long("message_id") ?: return@on
+            val poll = runCatching { json.decodeFromJsonElement<com.videocall.mobile.net.Poll>(d.obj()["poll"] ?: return@on) }.getOrNull() ?: return@on
+            mutateEverywhere(id) { it.copy(poll = poll) }
+        }
+        ws.on("blocks:changed") { _ -> scope.launch { loadBlocked() } }
+        ws.on("conversation:prefs") { d ->
+            val p = runCatching { json.decodeFromJsonElement<ConvoPref>(d) }.getOrNull() ?: return@on
+            _prefs.value = _prefs.value + (prefKey(p) to p)
+        }
+        ws.on("message:group-read") { d ->
+            val gid = d.long("group_id") ?: return@on
+            val from = d.long("from") ?: return@on
+            val last = d.long("last_read_id") ?: return@on
+            _groupReads.value = _groupReads.value + (gid to ((_groupReads.value[gid] ?: emptyMap()) + (from to last)))
         }
         // A rejected send (not a group member, too long, rate-limited...) comes
         // back as an "error" carrying our client_id; fail that bubble now
@@ -163,7 +257,9 @@ object ChatRepository {
                 msg.group_id != null -> Convo.GroupChat(msg.group_id)
                 else -> return@on
             }
+            val existed = (_messages.value[convo.key] ?: emptyList()).any { it.id == msg.id }
             appendMessage(convo, msg)
+            if (!existed) bumpThread(convo, msg)
             decryptPending(convo, listOf(msg))
             if (activeConvo != convo) {
                 _unread.value = _unread.value.toMutableMap().apply { put(convo.key, (get(convo.key) ?: 0) + 1) }
@@ -172,7 +268,9 @@ object ChatRepository {
                 val call = com.videocall.mobile.call.CallRepository.state.value
                 val inThisCall = com.videocall.mobile.App.isInForeground && call.status == com.videocall.mobile.call.CallStatus.ACTIVE &&
                     ((convo is Convo.Dm && call.peer?.id == convo.peerId) || (convo is Convo.GroupChat && call.group?.id == convo.groupId))
-                if (::appContext.isInitialized && !inThisCall) ChatNotifier.notifyNewMessage(appContext, convo, msg, me, _groups.value)
+                val mentioned = msg.mentions?.contains(me.id) == true
+                val silenced = (isMuted(convo.key) && !mentioned) || SessionManager.myStatus.value == "dnd"
+                if (::appContext.isInitialized && !inThisCall && !silenced) ChatNotifier.notifyNewMessage(appContext, convo, msg, me, _groups.value)
             } else {
                 markRead(convo)
             }
@@ -181,7 +279,9 @@ object ChatRepository {
             val msg = decodeMessage(d.obj()["message"] ?: return@on) ?: return@on
             val convo: Convo = if (msg.group_id != null) Convo.GroupChat(msg.group_id) else Convo.Dm(msg.recipient_id ?: return@on)
             d.str("client_id")?.let { pendingAcks.remove(it)?.third?.cancel() }
+            val existed = (_messages.value[convo.key] ?: emptyList()).any { it.id == msg.id }
             replaceOptimistic(convo, d.str("client_id"), msg)
+            if (!existed) bumpThread(convo, msg)
             decryptPending(convo, listOf(msg))
         }
         ws.on("message:unread") { d ->
@@ -194,11 +294,13 @@ object ChatRepository {
         }
         ws.on("message:typing") { d ->
             val name = d.str("from_name") ?: "Someone"
-            val key = d.long("group_id")?.let { "g:$it" } ?: d.long("from")?.let { "dm:$it" } ?: return@on
-            _typing.value = _typing.value.toMutableMap().apply { put(key, name) }
+            val from = d.long("from") ?: return@on
+            val key = d.long("group_id")?.let { "g:$it" } ?: "dm:$from"
+            typers.getOrPut(key) { mutableMapOf() }[from] = name to System.currentTimeMillis() + 3500
+            publishTyping()
             scope.launch {
-                kotlinx.coroutines.delay(3000)
-                _typing.value = _typing.value.toMutableMap().apply { remove(key) }
+                kotlinx.coroutines.delay(3600)
+                publishTyping()
             }
         }
         ws.on("message:read") { d ->
@@ -359,7 +461,7 @@ object ChatRepository {
         _groups.value = runCatching { SessionManager.api.groups() }.getOrDefault(emptyList())
     }
 
-    fun sendMessage(convo: Convo, content: String, fileId: Long? = null, replyToId: Long? = null) {
+    fun sendMessage(convo: Convo, content: String, fileId: Long? = null, replyToId: Long? = null, threadRootId: Long? = null, poll: PollDraft? = null) {
         val text = content.trim()
         if (text.isEmpty() && fileId == null) return
         val me = SessionManager.me.value ?: return
@@ -373,6 +475,7 @@ object ChatRepository {
             content = text,
             sent_at = java.time.Instant.now().toString(),
             reply_to_id = replyToId,
+            thread_root_id = threadRootId,
             clientId = clientId,
             pending = true,
             decryptedContent = text,
@@ -386,6 +489,22 @@ object ChatRepository {
                 _sendError.value = "Message not sent. Check your connection."
             }
         })
+
+        if (poll != null) {
+            // Polls are stored readable (the server tallies votes), so never encrypted.
+            val ok = SessionManager.ws.send("message:send", mapOf(
+                "client_id" to clientId,
+                "recipient_id" to (convo as? Convo.Dm)?.peerId,
+                "group_id" to (convo as? Convo.GroupChat)?.groupId,
+                "content" to text,
+                "poll" to mapOf("question" to text, "options" to poll.options, "multi" to poll.multi),
+            ))
+            if (!ok) {
+                pendingAcks.remove(clientId)?.third?.cancel()
+                markFailed(convo, optimistic.id)
+            }
+            return
+        }
 
         if (text.isNotEmpty() && isEncrypted(convo) && ::appContext.isInitialized) {
             scope.launch {
@@ -408,6 +527,8 @@ object ChatRepository {
                         "group_id" to (convo as? Convo.GroupChat)?.groupId,
                         "file_id" to fileId,
                         "reply_to_id" to replyToId,
+                        "mentions" to mentionIds(text),
+                        "thread_root_id" to threadRootId,
                         "content" to text,
                     ))
                     if (!ok) {
@@ -436,6 +557,8 @@ object ChatRepository {
                     "group_id" to (convo as? Convo.GroupChat)?.groupId,
                     "file_id" to fileId,
                     "reply_to_id" to replyToId,
+                        "mentions" to mentionIds(text),
+                        "thread_root_id" to threadRootId,
                     "content" to enc.ciphertext,
                     "encrypted" to true,
                     "enc_iv" to enc.iv,
@@ -455,6 +578,8 @@ object ChatRepository {
             "group_id" to (convo as? Convo.GroupChat)?.groupId,
             "file_id" to fileId,
             "reply_to_id" to replyToId,
+                        "mentions" to mentionIds(text),
+                        "thread_root_id" to threadRootId,
             "content" to text,
         ))
         if (!ok) {
@@ -472,7 +597,7 @@ object ChatRepository {
         _messages.value = _messages.value.toMutableMap().apply {
             put(convo.key, (get(convo.key) ?: emptyList()).filter { it.id != msg.id })
         }
-        sendMessage(convo, msg.decryptedContent ?: msg.content, msg.file_id, msg.reply_to_id)
+        sendMessage(convo, msg.decryptedContent ?: msg.content, msg.file_id, msg.reply_to_id, msg.thread_root_id)
     }
 
     // Each of these only applies its optimistic local mutation if the WS send
@@ -536,5 +661,159 @@ object ChatRepository {
             "peer_id" to (convo as? Convo.Dm)?.peerId,
             "group_id" to (convo as? Convo.GroupChat)?.groupId,
         ))
+    }
+
+    // ---- threads, polls, blocking ---------------------------------------
+
+    class PollDraft(val options: List<String>, val multi: Boolean)
+
+    private val _blocked = MutableStateFlow<Set<Long>>(emptySet())
+    val blocked: StateFlow<Set<Long>> = _blocked
+
+    suspend fun loadBlocked() {
+        _blocked.value = runCatching { SessionManager.api.blockedUsers() }.getOrNull()?.toSet() ?: return
+    }
+
+    suspend fun setBlocked(userId: Long, on: Boolean) {
+        if (on) SessionManager.api.blockUser(userId) else SessionManager.api.unblockUser(userId)
+        loadBlocked()
+    }
+
+    private fun bumpThread(convo: Convo, msg: Message) {
+        val root = msg.thread_root_id ?: return
+        val list = (_messages.value[convo.key] ?: return).map { if (it.id == root) it.copy(thread_count = it.thread_count + 1) else it }
+        _messages.value = _messages.value.toMutableMap().apply { put(convo.key, list) }
+    }
+
+    /** Loads a thread's replies into the conversation so the thread view (and unread logic) can see them. */
+    suspend fun loadThread(convo: Convo, rootId: Long) {
+        val replies = runCatching { SessionManager.api.thread(rootId) }.getOrNull() ?: return
+        if (replies.isEmpty()) return
+        merge(convo, replies)
+        decryptPending(convo, replies)
+    }
+
+    fun votePoll(pollId: Long, optionId: Long) {
+        SessionManager.ws.send("poll:vote", mapOf("poll_id" to pollId, "option_id" to optionId))
+    }
+
+    fun closePoll(pollId: Long) {
+        SessionManager.ws.send("poll:close", mapOf("poll_id" to pollId))
+    }
+
+    // ---- offline cache -------------------------------------------------
+
+    @kotlinx.serialization.Serializable
+    private data class DiskCache(val messages: Map<String, List<Message>> = emptyMap(), val groups: List<Group> = emptyList())
+
+    private fun cacheFile(): File? {
+        if (!::appContext.isInitialized) return null
+        val uid = SessionManager.me.value?.id ?: return null
+        return File(appContext.filesDir, "chat-cache-$uid.json")
+    }
+
+    private fun loadDiskCache() {
+        val f = cacheFile() ?: return
+        runCatching {
+            if (!f.exists()) return
+            val c = json.decodeFromString<DiskCache>(f.readText())
+            if (_messages.value.isEmpty()) _messages.value = c.messages
+            if (_groups.value.isEmpty()) _groups.value = c.groups
+            redecryptAll()
+        }
+    }
+
+    private var cacheWriterStarted = false
+
+    // Saves the latest messages of every chat two seconds after things settle,
+    // so the app opens with recent history even with no connection.
+    private fun startCacheWriter() {
+        if (cacheWriterStarted) return
+        cacheWriterStarted = true
+        scope.launch {
+            combine(_messages, _groups) { m, g -> m to g }.collectLatest { (m, g) ->
+                kotlinx.coroutines.delay(2000)
+                val f = cacheFile() ?: return@collectLatest
+                val slim = m.mapValues { (_, list) ->
+                    list.filter { it.id > 0 }.takeLast(50).map { it.copy(decryptedContent = null, clientId = null, pending = false, failed = false) }
+                }.filterValues { it.isNotEmpty() }
+                withContext(Dispatchers.IO) {
+                    runCatching { f.writeText(json.encodeToString(DiskCache.serializer(), DiskCache(slim, g))) }
+                }
+            }
+        }
+    }
+
+    private fun deleteDiskCache() {
+        if (!::appContext.isInitialized) return
+        appContext.filesDir.listFiles { f -> f.name.startsWith("chat-cache-") }?.forEach { it.delete() }
+    }
+
+    private fun convoOf(key: String): Convo? = when {
+        key.startsWith("dm:") -> key.removePrefix("dm:").toLongOrNull()?.let { Convo.Dm(it) }
+        key.startsWith("g:") -> key.removePrefix("g:").toLongOrNull()?.let { Convo.GroupChat(it) }
+        else -> null
+    }
+
+    private val resent = mutableSetOf<String>()
+
+    /** After a reconnect, sends once more anything that failed while offline. */
+    private fun resendFailed() {
+        for ((key, list) in _messages.value) {
+            val convo = convoOf(key) ?: continue
+            for (m in list) {
+                val id = m.clientId ?: continue
+                if (m.failed && m.id < 0 && resent.add(id)) retryMessage(convo, m)
+            }
+        }
+    }
+
+    // ---- export / local search of encrypted chats -----------------------
+
+    private suspend fun plainText(m: Message): String {
+        if (m.deleted_at != null) return "(deleted)"
+        if (!m.is_encrypted) return m.content
+        return runCatching { Crypto.decryptMessageContent(appContext, m.id, m.is_encrypted, m.content, m.enc_iv, m.enc_keys) }.getOrNull()
+            ?: "(can't decrypt on this device)"
+    }
+
+    /** Whole history as a readable transcript, decrypted on this device. */
+    suspend fun exportTranscript(convo: Convo, titleOf: (Long) -> String): File = withContext(Dispatchers.IO) {
+        val all = LinkedHashMap<Long, Message>()
+        var before: Long? = null
+        for (page in 0 until 200) {
+            val batch = fetchPage(convo, before) ?: throw java.io.IOException("Couldn't load the whole history")
+            batch.forEach { all[it.id] = it }
+            if (batch.size < 50) break
+            before = batch.minOf { it.id }
+        }
+        val zone = java.time.ZoneId.systemDefault()
+        val fmt = java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
+        val sb = StringBuilder()
+        for (m in all.values.sortedWith(::messageOrder)) {
+            val whenText = runCatching { fmt.format(java.time.Instant.parse(m.sent_at).atZone(zone)) }.getOrDefault(m.sent_at)
+            val who = m.sender?.display_name ?: titleOf(m.sender_id)
+            sb.append('[').append(whenText).append("] ").append(who).append(": ").append(plainText(m))
+            m.file?.let { sb.append("  [file: ").append(it.name).append(']') }
+            sb.append('\n')
+        }
+        val dir = File(appContext.cacheDir, "downloads").apply { mkdirs() }
+        File(dir, "chat-${convo.key.replace(':', '-')}.txt").also { it.writeText(sb.toString()) }
+    }
+
+    /** Searches the latest page of each known chat, decrypting on this device. */
+    suspend fun searchEncrypted(query: String): List<Message> = withContext(Dispatchers.IO) {
+        val q = query.lowercase()
+        val hits = mutableListOf<Message>()
+        for (key in _messages.value.keys.take(40)) {
+            val convo = convoOf(key) ?: continue
+            val page = fetchPage(convo, null) ?: continue
+            for (m in page) {
+                if (!m.is_encrypted || m.deleted_at != null) continue
+                val text = plainText(m)
+                if (text.lowercase().contains(q)) hits += m.copy(is_encrypted = false, content = text)
+            }
+        }
+        hits.sortedByDescending { it.sent_at }
     }
 }

@@ -23,6 +23,9 @@ data class User(
     val deleted: Boolean = false,
     val created_at: String = "",
     val oidc_linked: Boolean = false,
+    val status_text: String = "",
+    val must_change_password: Boolean = false,
+    val totp_enabled: Boolean = false,
     val status: String = "offline",
     // Present on /api/me, /api/login and PATCH /api/users/me — the account's
     // saved look, shared with the web client (see ui/theme/Theme.kt).
@@ -95,6 +98,12 @@ data class Message(
     val is_encrypted: Boolean = false,
     val enc_iv: String? = null,
     val enc_keys: String? = null,
+    val mentions: List<Long>? = null,
+    // Set on a reply that lives inside another message's thread.
+    val thread_root_id: Long? = null,
+    // On a thread's first message: how many replies it has.
+    val thread_count: Int = 0,
+    val poll: Poll? = null,
     val reply_to: MessagePreview? = null,
     val reactions: List<MessageReaction>? = null,
     val sender: UserBrief? = null,
@@ -115,6 +124,21 @@ data class Group(
     val created_at: String = "",
     val avatar_file_id: Long? = null,
     val members: List<GroupMember> = emptyList(),
+    // Public groups are channels anyone can find and join.
+    val public: Boolean = false,
+    val member_count: Int = 0,
+)
+
+@Serializable
+data class PollOption(val id: Long, val text: String, val votes: List<Long> = emptyList())
+
+@Serializable
+data class Poll(
+    val id: Long,
+    val question: String,
+    val multi: Boolean = false,
+    val closed: Boolean = false,
+    val options: List<PollOption> = emptyList(),
 )
 
 @Serializable
@@ -198,6 +222,8 @@ data class PrivateRoom(
     val require_approval: Boolean = false,
     val is_owner: Boolean = false,
     val created_at: String = "",
+    // Start time of a scheduled meeting (ISO-8601 UTC); empty for an instant room.
+    val scheduled_at: String = "",
 )
 
 @Serializable
@@ -230,3 +256,21 @@ data class AuditEntry(
 
 @Serializable
 data class OidcConfig(val enabled: Boolean = false, val button_label: String? = null)
+
+/** One signed-in device (GET /api/users/me/sessions). */
+@Serializable
+data class SessionInfo(
+    val id: String,
+    val user_agent: String = "",
+    val ip: String = "",
+    val created_at: String = "",
+    val last_seen: String = "",
+    val current: Boolean = false,
+)
+
+/** Per-conversation mute/archive (kind is "dm" or "group"). */
+@Serializable
+data class ConvoPref(val kind: String, val target_id: Long, val muted: Boolean = false, val archived: Boolean = false)
+
+@Serializable
+data class TotpSetup(val secret: String, val uri: String)

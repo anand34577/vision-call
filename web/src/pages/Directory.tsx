@@ -148,7 +148,7 @@ export default function Directory() {
                   </p>
                   <p className="text-xs text-ink-muted truncate mt-0.5">@{u.username}</p>
                   <p className="text-[11px] mt-1 text-ink-muted flex items-center gap-1">
-                    <span>{presenceLabel(u.status)}</span>
+                    <span className="truncate">{presenceLabel(u.status)}{u.status_text ? ` · ${u.status_text}` : ""}</span>
                   </p>
                 </div>
               </button>

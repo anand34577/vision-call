@@ -101,7 +101,9 @@ var Catalog = []Field{
 
 	// ---- Security & Sessions ----
 	{Key: "JWT_SECRET", Label: "JWT signing secret", Description: "Fixed at boot - it must be stable before any session can be validated, including the one that would let you change it here.", Kind: KindSecret, Group: GroupSecurity, Dynamic: false},
-	{Key: "SESSION_TTL_HOURS", Label: "Session lifetime (hours)", Description: "How long a login session lasts. Takes effect immediately for new logins; existing sessions keep their original expiry.", Kind: KindInt, Default: "12", Group: GroupSecurity, Dynamic: true},
+	{Key: "SESSION_TTL_HOURS", Label: "Session lifetime (hours)", Description: "How long a device stays signed in without being used. The timer restarts each time the app is used, so people who use it regularly stay signed in. Takes effect immediately.", Kind: KindInt, Default: "720", Group: GroupSecurity, Dynamic: true},
+	{Key: "MESSAGE_RETENTION_DAYS", Label: "Message retention (days)", Description: "Permanently delete chat messages older than this many days (pinned messages are kept). 0 keeps everything. Runs once a day.", Kind: KindInt, Default: "0", Group: GroupSecurity, Dynamic: true},
+	{Key: "METRICS_TOKEN", Label: "Metrics access token", Description: "If set, /metrics requires 'Authorization: Bearer <token>'. If empty, /metrics is only reachable from the server itself and private networks.", Kind: KindSecret, Group: GroupSecurity, Dynamic: true},
 
 	// ---- Network & TLS: the first six bind a socket / load a certificate
 	// file once at boot, before this Settings store's own database is even
@@ -162,6 +164,8 @@ type Values struct {
 	OIDCAutoCreateUsers   bool
 	OIDCButtonLabel       string
 	SessionTTLHours       int
+	MessageRetentionDays  int
+	MetricsToken          string
 	LogLevel              string
 	TrustProxy            bool
 	ProxyTLS              bool
@@ -226,6 +230,8 @@ func (s *Store) Reload() {
 		OIDCAutoCreateUsers:   s.resolveBool("OIDC_AUTO_CREATE_USERS", s.defaults.OIDCAutoCreateUsers),
 		OIDCButtonLabel:       s.resolveString("OIDC_BUTTON_LABEL", s.defaults.OIDCButtonLabel),
 		SessionTTLHours:       s.resolveInt("SESSION_TTL_HOURS", s.defaults.SessionTTLHours),
+		MessageRetentionDays:  s.resolveInt("MESSAGE_RETENTION_DAYS", s.defaults.MessageRetentionDays),
+		MetricsToken:          s.resolveString("METRICS_TOKEN", s.defaults.MetricsToken),
 		LogLevel:              logLevel,
 		TrustProxy:            s.resolveBool("TRUST_PROXY", s.defaults.TrustProxy),
 		ProxyTLS:              s.resolveBool("PROXY_TLS", s.defaults.ProxyTLS),
@@ -300,11 +306,12 @@ func (s *Store) sourceOfDynamic(key string) string {
 // (SESSION_TTL_HOURS=0 expires every session at login, a negative
 // MAX_FILE_MB rejects every upload, ...). Mirrors config.Validate's clamps.
 var intRanges = map[string][2]int{
-	"SESSION_TTL_HOURS":     {1, 24 * 365},
-	"MAX_CALL_PARTICIPANTS": {2, 100},
-	"MAX_FILE_MB":           {1, 10240},
-	"MAX_USER_STORAGE_MB":   {0, 1 << 30},
-	"SMTP_PORT":             {1, 65535},
+	"SESSION_TTL_HOURS":      {1, 24 * 365},
+	"MESSAGE_RETENTION_DAYS": {0, 36500},
+	"MAX_CALL_PARTICIPANTS":  {2, 100},
+	"MAX_FILE_MB":            {1, 10240},
+	"MAX_USER_STORAGE_MB":    {0, 1 << 30},
+	"SMTP_PORT":              {1, 65535},
 }
 
 func validateKind(key string, k Kind, value string) error {

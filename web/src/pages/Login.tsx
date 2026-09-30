@@ -60,6 +60,8 @@ export default function Login() {
   const login = useAuth((s) => s.login);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [totp, setTotp] = useState("");
+  const [needTotp, setNeedTotp] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [capsOn, setCapsOn] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -93,9 +95,13 @@ export default function Login() {
     e.preventDefault();
     setBusy(true);
     setError(null);
-    const err = await login(username.trim(), password);
-    if (err) setError(err);
-    else void requestNotificationPermission();
+    const err = await login(username.trim(), password, needTotp ? totp.trim() : undefined);
+    if (err === "two-factor code required") {
+      setNeedTotp(true);
+    } else if (err) {
+      setError(err);
+      if (needTotp) setTotp("");
+    } else void requestNotificationPermission();
     setBusy(false);
   };
 
@@ -177,8 +183,25 @@ export default function Login() {
               </div>
               {capsOn && <p className="text-xs text-amber-500 mt-1.5" role="status">Caps Lock is on</p>}
             </div>
+            {needTotp && (
+              <div>
+                <label htmlFor="login-totp" className="block text-xs font-semibold text-ink-secondary mb-1.5">
+                  Authenticator code
+                </label>
+                <input
+                  id="login-totp"
+                  className={inputCls}
+                  value={totp}
+                  onChange={(e) => setTotp(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  autoFocus
+                  placeholder="6-digit code"
+                />
+              </div>
+            )}
             {error && <Alert variant="error">{error}</Alert>}
-            <button className={`${btnPrimary} w-full py-2.5 mt-1`} disabled={busy || !username || !password}>
+            <button className={`${btnPrimary} w-full py-2.5 mt-1`} disabled={busy || !username || !password || (needTotp && totp.length !== 6)}>
               {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
               Sign in
             </button>

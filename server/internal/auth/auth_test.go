@@ -6,6 +6,7 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+	"visioncall/internal/db"
 )
 
 func TestHashPasswordRoundTrip(t *testing.T) {
@@ -114,5 +115,46 @@ func TestRealIPRightmostForwarded(t *testing.T) {
 	}
 	if got := RealIP(r, false); got != "10.0.0.2" {
 		t.Fatalf("untrusted proxy headers must be ignored, got %s", got)
+	}
+}
+
+func TestTOTPRFC6238Vector(t *testing.T) {
+	// RFC 6238 appendix B, SHA-1 secret "12345678901234567890", T=59s -> 94287082 (last 6: 287082).
+	secret := b32.EncodeToString([]byte("12345678901234567890"))
+	if got, _ := totpCode(secret, 1); got != "287082" {
+		t.Fatalf("totp = %s, want 287082", got)
+	}
+	if !VerifyTOTP(secret, "287082", time.Unix(59, 0)) || VerifyTOTP(secret, "000000", time.Unix(59, 0)) {
+		t.Fatal("VerifyTOTP wrong")
+	}
+}
+
+// A used session slides forward, an unused one is not extended, and the
+// signed token itself never has to change.
+func TestSessionSlidesWhileUsed(t *testing.T) {
+	d, err := db.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	u, _ := d.CreateUser("bob", "Bob", "x", "user")
+	secret := []byte("s")
+	id, tok, _ := MintSession(secret, u.ID, "user")
+	// 1h of a 720h session left: well inside the slide window.
+	if err := d.CreateSession(id, u.ID, HashToken(tok), time.Now().Add(time.Hour), "ua", "1.1.1.1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ValidateSession(d, secret, tok, 720*time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	_, exp, _, _ := d.GetSession(id)
+	if time.Until(exp) < 700*time.Hour {
+		t.Fatalf("session not extended: %v left", time.Until(exp))
+	}
+	// Expired sessions are rejected, not revived.
+	id2, tok2, _ := MintSession(secret, u.ID, "user")
+	_ = d.CreateSession(id2, u.ID, HashToken(tok2), time.Now().Add(-time.Minute), "", "")
+	if _, err := ValidateSession(d, secret, tok2, 720*time.Hour); err == nil {
+		t.Fatal("expired session accepted")
 	}
 }
