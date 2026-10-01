@@ -780,47 +780,57 @@ private fun CallControls(
             .navigationBarsPadding().padding(top = 36.dp, bottom = 20.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Row(
-            Modifier.clip(RoundedCornerShape(36.dp)).background(Color(0xFF1A1F2B).copy(alpha = 0.92f)).padding(horizontal = 10.dp, vertical = 10.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            ControlButton(if (state.micOn) Icons.Default.Mic else Icons.Default.MicOff, if (state.micOn) "Mute" else "Unmute", off = !state.micOn) { CallRepository.toggleMic() }
-            ControlButton(if (state.camOn) Icons.Default.Videocam else Icons.Default.VideocamOff, if (state.camOn) "Turn camera off" else "Turn camera on", off = !state.camOn) { CallRepository.toggleCam() }
-            ControlButton(if (state.speakerOn) Icons.Default.VolumeUp else Icons.Default.PhoneInTalk, if (state.speakerOn) "Speaker on" else "Earpiece", active = state.speakerOn) { CallRepository.toggleSpeaker() }
-            if (onShowChat != null) ControlButton(Icons.Default.ChatBubble, "Chat", badge = chatUnread) { onShowChat() }
-            Box {
-                ControlButton(Icons.Default.MoreHoriz, "More") { more = true }
-                DropdownMenu(expanded = more, onDismissRequest = { more = false }) {
-                    if (state.camOn) DropdownMenuItem(text = { Text("Switch camera") }, leadingIcon = { Icon(Icons.Default.Cameraswitch, null) }, onClick = { more = false; CallRepository.switchCamera() })
-                    DropdownMenuItem(
-                        text = { Text(if (state.sharing) "Stop sharing" else "Share screen") },
-                        leadingIcon = { Icon(if (state.sharing) Icons.Default.StopScreenShare else Icons.Default.ScreenShare, null) },
-                        onClick = { more = false; if (state.sharing) CallRepository.stopScreenShare() else onRequestScreenShare() },
-                    )
-                    if (state.mode == CallMode.SFU) {
-                        val raised = me?.id?.let { state.raisedHands.contains(it) } ?: false
-                        DropdownMenuItem(text = { Text(if (raised) "Lower hand" else "Raise hand") }, leadingIcon = { Icon(Icons.Default.PanTool, null) }, onClick = { more = false; CallRepository.toggleRaiseHand() })
-                        DropdownMenuItem(text = { Text("Participants (${state.participants.size})") }, leadingIcon = { Icon(Icons.Default.People, null) }, onClick = { more = false; onShowParticipants() })
+        // Every button is a perfect circle: size is derived from the width we actually have so
+        // the Row never has to squeeze (which turned circles into ovals on narrow screens).
+        BoxWithConstraints(Modifier.padding(horizontal = 12.dp)) {
+            val count = if (onShowChat != null) 5 else 4 // round buttons incl. "More"
+            val gap = 8.dp
+            val pad = 10.dp
+            // hang-up counts as 1.3 buttons wide; 1 gap between each of (count + 1) items
+            val btn = ((maxWidth - pad * 2 - gap * count) / (count + 1.3f)).coerceIn(40.dp, 56.dp)
+            Row(
+                Modifier.clip(RoundedCornerShape(btn * 0.65f)).background(Color(0xFF1A1F2B).copy(alpha = 0.92f)).padding(horizontal = pad, vertical = pad),
+                horizontalArrangement = Arrangement.spacedBy(gap),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                ControlButton(if (state.micOn) Icons.Default.Mic else Icons.Default.MicOff, if (state.micOn) "Mute" else "Unmute", btn, off = !state.micOn) { CallRepository.toggleMic() }
+                ControlButton(if (state.camOn) Icons.Default.Videocam else Icons.Default.VideocamOff, if (state.camOn) "Turn camera off" else "Turn camera on", btn, off = !state.camOn) { CallRepository.toggleCam() }
+                ControlButton(if (state.speakerOn) Icons.Default.VolumeUp else Icons.Default.PhoneInTalk, if (state.speakerOn) "Speaker on" else "Earpiece", btn, active = state.speakerOn) { CallRepository.toggleSpeaker() }
+                if (onShowChat != null) ControlButton(Icons.Default.ChatBubble, "Chat", btn, badge = chatUnread) { onShowChat() }
+                Box {
+                    ControlButton(Icons.Default.MoreHoriz, "More", btn) { more = true }
+                    DropdownMenu(expanded = more, onDismissRequest = { more = false }) {
+                        if (state.camOn) DropdownMenuItem(text = { Text("Switch camera") }, leadingIcon = { Icon(Icons.Default.Cameraswitch, null) }, onClick = { more = false; CallRepository.switchCamera() })
+                        DropdownMenuItem(
+                            text = { Text(if (state.sharing) "Stop sharing" else "Share screen") },
+                            leadingIcon = { Icon(if (state.sharing) Icons.Default.StopScreenShare else Icons.Default.ScreenShare, null) },
+                            onClick = { more = false; if (state.sharing) CallRepository.stopScreenShare() else onRequestScreenShare() },
+                        )
+                        if (state.mode == CallMode.SFU) {
+                            val raised = me?.id?.let { state.raisedHands.contains(it) } ?: false
+                            DropdownMenuItem(text = { Text(if (raised) "Lower hand" else "Raise hand") }, leadingIcon = { Icon(Icons.Default.PanTool, null) }, onClick = { more = false; CallRepository.toggleRaiseHand() })
+                            DropdownMenuItem(text = { Text("Participants (${state.participants.size})") }, leadingIcon = { Icon(Icons.Default.People, null) }, onClick = { more = false; onShowParticipants() })
+                        }
                     }
                 }
+                FilledIconButton(
+                    onClick = { CallRepository.hangup() },
+                    colors = IconButtonDefaults.filledIconButtonColors(containerColor = VcColor.Danger, contentColor = Color.White),
+                    modifier = Modifier.size(width = btn * 1.3f, height = btn),
+                    shape = RoundedCornerShape(btn / 2),
+                ) { Icon(Icons.Default.CallEnd, "Hang up", Modifier.size(btn / 2)) }
             }
-            FilledIconButton(
-                onClick = { CallRepository.hangup() },
-                colors = IconButtonDefaults.filledIconButtonColors(containerColor = VcColor.Danger, contentColor = Color.White),
-                modifier = Modifier.size(width = 72.dp, height = 56.dp),
-                shape = RoundedCornerShape(28.dp),
-            ) { Icon(Icons.Default.CallEnd, "Hang up", Modifier.size(28.dp)) }
         }
     }
 }
 
 @Composable
-private fun ControlButton(icon: ImageVector, label: String, off: Boolean = false, active: Boolean = false, badge: Int = 0, onClick: () -> Unit) {
+private fun ControlButton(icon: ImageVector, label: String, size: Dp, off: Boolean = false, active: Boolean = false, badge: Int = 0, onClick: () -> Unit) {
     Box {
     FilledIconButton(
         onClick = onClick,
-        modifier = Modifier.size(56.dp),
+        modifier = Modifier.size(size),
+        shape = CircleShape,
         colors = IconButtonDefaults.filledIconButtonColors(
             containerColor = when {
                 off -> Color.White
