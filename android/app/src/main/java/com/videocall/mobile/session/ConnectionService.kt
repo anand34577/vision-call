@@ -41,6 +41,19 @@ class ConnectionService : Service() {
             lastNetwork = network
             if (SessionManager.hasServer) SessionManager.ws.reconnectNow(force = changed)
         }
+
+        // No default network left (airplane mode, Wi-Fi off): we are not reachable.
+        override fun onLost(network: android.net.Network) = setOnline(false)
+    }
+
+    // Notification text follows the real socket state instead of always claiming "Connected".
+    private var online = false
+    private val unsubs = mutableListOf<() -> Unit>()
+
+    private fun setOnline(value: Boolean) {
+        if (online == value) return
+        online = value
+        getSystemService(android.app.NotificationManager::class.java).notify(NOTIF_ID, buildNotification())
     }
 
     override fun onCreate() {
@@ -48,9 +61,16 @@ class ConnectionService : Service() {
         runCatching {
             getSystemService(android.net.ConnectivityManager::class.java).registerDefaultNetworkCallback(networkCallback)
         }
+        runCatching {
+            val ws = SessionManager.ws
+            online = ws.connected
+            unsubs += ws.on("ws:open") { setOnline(true) }
+            unsubs += ws.on("ws:close") { setOnline(false) }
+        }
     }
 
     override fun onDestroy() {
+        unsubs.forEach { it() }
         runCatching { getSystemService(android.net.ConnectivityManager::class.java).unregisterNetworkCallback(networkCallback) }
         super.onDestroy()
     }
@@ -83,7 +103,8 @@ class ConnectionService : Service() {
         return NotificationCompat.Builder(this, App.CHANNEL_CONNECTION)
             .setSmallIcon(com.videocall.mobile.R.drawable.ic_launcher_foreground)
             .setContentTitle("Vision Call")
-            .setContentText("Connected and ready to receive calls")
+            .setContentText(if (online) "Connected and ready to receive calls" else "Offline – waiting for connection")
+            .setOnlyAlertOnce(true)
             .setPriority(NotificationCompat.PRIORITY_MIN)
             .setOngoing(true)
             .setContentIntent(openApp)
