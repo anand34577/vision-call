@@ -1,5 +1,7 @@
 # Vision Call
 
+<p align="center"><img src="docs/screenshots/hero.png" alt="Vision Call: private chat and video calls on your own server" width="900"></p>
+
 [![Latest release](https://img.shields.io/github/v/release/anand34577/vision-call)](https://github.com/anand34577/vision-call/releases/latest)
 [![CI](https://github.com/anand34577/vision-call/actions/workflows/ci.yml/badge.svg)](https://github.com/anand34577/vision-call/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
@@ -19,6 +21,18 @@ Install it once on a machine in your office or home. Everyone on the same networ
 - **Admin tools**: manage accounts, change settings in the browser, read the audit log, and optionally use single sign-on (OpenID Connect).
 - **Runs anywhere**: Docker, Linux, Windows or macOS, on regular PCs and ARM boards like the Raspberry Pi. Uses a built-in database by default, or Postgres/MySQL if you prefer.
 - **Any device**: modern browsers on computers and phones (installable as an app), plus a native Android app.
+
+## Screenshots
+
+| Chat | Group call |
+|---|---|
+| ![Encrypted group chat](docs/screenshots/chat-dark.png) | ![Group video call](docs/screenshots/call-dark.png) |
+
+| Light theme | Admin panel |
+|---|---|
+| ![Light theme](docs/screenshots/chat-light.png) | ![Admin panel](docs/screenshots/admin-dark.png) |
+
+Six built-in themes, including Dark, Light, Midnight OLED and Nordic Forest. People and conversations shown are demo data.
 
 ## Install
 
