@@ -34,6 +34,8 @@ interface StoredKeyPair {
 }
 
 interface WrappedKeyEntry {
+  /** 2 = ciphertext and key wraps are bound to sender + conversation (AAD). */
+  v?: number;
   user_id: number;
   device_id: string;
   wrapped_key: string; // base64
@@ -152,7 +154,11 @@ export function ensureDeviceRegistered(userID: number): Promise<void> {
       const { publicKey } = await getDeviceKeyPair();
       const jwk = await crypto.subtle.exportKey("jwk", publicKey);
       await api.registerDeviceKey(deviceID(), JSON.stringify(jwk));
-    })();
+    })().catch((err) => {
+      // A failed attempt must not be cached forever: allow the next call to retry.
+      registerPromise = null;
+      throw err;
+    });
   }
   return registerPromise;
 }
@@ -177,6 +183,79 @@ async function deriveWrapKey(privateKey: CryptoKey, peerPublicJwk: JsonWebKey): 
   );
 }
 
+/** Who sent a message and where: bound into the encryption as AAD (v2). */
+export interface CryptoContext {
+  senderID: number;
+  /** "dm:<lowId>-<highId>" or "g:<groupId>" */
+  convo: string;
+}
+
+export function convoOf(m: { sender_id: number; recipient_id: number | null; group_id: number | null }): string | null {
+  if (m.group_id != null) return `g:${m.group_id}`;
+  if (m.recipient_id != null) return `dm:${Math.min(m.sender_id, m.recipient_id)}-${Math.max(m.sender_id, m.recipient_id)}`;
+  return null;
+}
+
+const aadBytes = (ctx: CryptoContext) => new TextEncoder().encode(`vc2|${ctx.senderID}|${ctx.convo}`);
+
+// ---- key pinning (trust on first use) ----
+// The server hands out every device key, so a rogue or compromised server
+// could slip in its own. Remember the first key seen per (user, device) and
+// refuse once when it later changes, so the user gets a chance to notice.
+const PIN_KEY = "vc.keypins.v1";
+const fp = (jwk: JsonWebKey) => `${jwk.x}.${jwk.y}`;
+function loadPins(): Record<string, string> {
+  try {
+    return JSON.parse(localStorage.getItem(PIN_KEY) ?? "{}");
+  } catch {
+    return {};
+  }
+}
+function savePins(p: Record<string, string>) {
+  try {
+    localStorage.setItem(PIN_KEY, JSON.stringify(p));
+  } catch {
+    /* private mode: pinning just won't persist */
+  }
+}
+/** Returns the user ids whose key for an already-known device changed. Pins are updated, so a retry goes through. */
+function checkPins(keys: { user_id: number; device_id: string; public_key_jwk: string }[]): number[] {
+  const pins = loadPins();
+  const changed = new Set<number>();
+  for (const k of keys) {
+    let jwk: JsonWebKey;
+    try {
+      jwk = JSON.parse(k.public_key_jwk);
+    } catch {
+      continue;
+    }
+    const id = `${k.user_id}:${k.device_id}`;
+    const now = fp(jwk);
+    if (pins[id] && pins[id] !== now) changed.add(k.user_id);
+    pins[id] = now;
+  }
+  savePins(pins);
+  return [...changed];
+}
+
+let senderKeyCache: { at: number; byUser: Map<number, string[]> } = { at: 0, byUser: new Map() };
+async function senderKeyKnown(senderID: number, jwk: JsonWebKey): Promise<boolean> {
+  if (Date.now() - senderKeyCache.at > 30_000) senderKeyCache = { at: Date.now(), byUser: new Map() };
+  let list = senderKeyCache.byUser.get(senderID);
+  if (!list) {
+    const keys = await api.deviceKeys([senderID]);
+    list = keys.map((k) => {
+      try {
+        return fp(JSON.parse(k.public_key_jwk));
+      } catch {
+        return "";
+      }
+    });
+    senderKeyCache.byUser.set(senderID, list);
+  }
+  return list.includes(fp(jwk));
+}
+
 export interface EncryptedPayload {
   ciphertext: string;
   iv: string;
@@ -195,7 +274,7 @@ export async function usersMissingKeys(userIDs: number[]): Promise<number[]> {
 // encryptForRecipients encrypts plaintext for every device of every user in
 // recipientUserIDs (which should include the sender's own id, so their
 // other devices/history sync too — callers pass the full participant set).
-export async function encryptForRecipients(plaintext: string, recipientUserIDs: number[]): Promise<EncryptedPayload> {
+export async function encryptForRecipients(plaintext: string, recipientUserIDs: number[], ctx: CryptoContext): Promise<EncryptedPayload> {
   const { publicKey, privateKey } = await getDeviceKeyPair();
   const ownPubJwk = await crypto.subtle.exportKey("jwk", publicKey);
 
@@ -203,10 +282,15 @@ export async function encryptForRecipients(plaintext: string, recipientUserIDs: 
   if (allKeys.length === 0) {
     throw new Error("No recipient has encryption set up on any device yet");
   }
+  const changed = checkPins(allKeys);
+  if (changed.length > 0) {
+    throw new Error("A recipient's encryption key changed since you last wrote to them (new device or reset). Check with them if unexpected, then send again.");
+  }
+  const aad = aadBytes(ctx);
 
   const contentKey = await crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, true, ["encrypt", "decrypt"]);
   const iv = crypto.getRandomValues(new Uint8Array(12));
-  const ciphertextBuf = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, contentKey, new TextEncoder().encode(plaintext));
+  const ciphertextBuf = await crypto.subtle.encrypt({ name: "AES-GCM", iv, additionalData: aad }, contentKey, new TextEncoder().encode(plaintext));
   const rawContentKey = new Uint8Array(await crypto.subtle.exportKey("raw", contentKey));
 
   // Every device gets a wrapped key, including the sender's own current
@@ -217,8 +301,9 @@ export async function encryptForRecipients(plaintext: string, recipientUserIDs: 
     try {
       const wrapKey = await deriveWrapKey(privateKey, JSON.parse(dk.public_key_jwk));
       const wrapIv = crypto.getRandomValues(new Uint8Array(12));
-      const wrapped = await crypto.subtle.encrypt({ name: "AES-GCM", iv: wrapIv }, wrapKey, rawContentKey);
+      const wrapped = await crypto.subtle.encrypt({ name: "AES-GCM", iv: wrapIv, additionalData: aad }, wrapKey, rawContentKey);
       encKeys.push({
+        v: 2,
         user_id: dk.user_id, device_id: dk.device_id,
         wrapped_key: b64encode(wrapped), wrap_iv: b64encode(wrapIv.buffer as ArrayBuffer),
         sender_pub_jwk: ownPubJwk as JsonWebKey,
@@ -252,7 +337,7 @@ export function clearDecryptCache(): void {
 // this device, or null if this device has no wrapped key for it (sent
 // before this device registered, or the sender excluded it). Results are
 // cached by message id since decryption is a few async crypto calls.
-export async function decryptMessageContent(msg: { id: number; is_encrypted: boolean; content: string; enc_iv?: string | null; enc_keys?: string | null }): Promise<string | null> {
+export async function decryptMessageContent(msg: { id: number; is_encrypted: boolean; content: string; enc_iv?: string | null; enc_keys?: string | null; sender_id?: number; recipient_id?: number | null; group_id?: number | null }): Promise<string | null> {
   if (!msg.is_encrypted) return msg.content;
   if (!isCryptoSubtleAvailable()) return "[Encrypted message — HTTPS required to decrypt]";
   if (decryptCache.has(msg.id)) {
@@ -274,7 +359,7 @@ export async function decryptMessageContent(msg: { id: number; is_encrypted: boo
   return result;
 }
 
-async function decryptNow(msg: { content: string; enc_iv?: string | null; enc_keys?: string | null }): Promise<string | null> {
+async function decryptNow(msg: { content: string; enc_iv?: string | null; enc_keys?: string | null; sender_id?: number; recipient_id?: number | null; group_id?: number | null }): Promise<string | null> {
   if (!msg.enc_keys || !msg.enc_iv) return null;
   let entries: WrappedKeyEntry[];
   try {
@@ -293,11 +378,20 @@ async function decryptNow(msg: { content: string; enc_iv?: string | null; enc_ke
     if (!mine || !privateKey) return null;
   }
   try {
+    let aad: Uint8Array | undefined;
+    if (mine.v === 2) {
+      // v2: must know who sent it and where, and the sender's key must be one
+      // the sender actually has registered.
+      const convo = msg.sender_id != null ? convoOf({ sender_id: msg.sender_id, recipient_id: msg.recipient_id ?? null, group_id: msg.group_id ?? null }) : null;
+      if (msg.sender_id == null || !convo) return null;
+      if (!(await senderKeyKnown(msg.sender_id, mine.sender_pub_jwk))) return null;
+      aad = aadBytes({ senderID: msg.sender_id, convo });
+    }
     privateKey ??= (await getDeviceKeyPair()).privateKey;
     const wrapKey = await deriveWrapKey(privateKey, mine.sender_pub_jwk);
-    const rawContentKey = await crypto.subtle.decrypt({ name: "AES-GCM", iv: b64decode(mine.wrap_iv) }, wrapKey, b64decode(mine.wrapped_key));
+    const rawContentKey = await crypto.subtle.decrypt({ name: "AES-GCM", iv: b64decode(mine.wrap_iv), ...(aad ? { additionalData: aad } : {}) }, wrapKey, b64decode(mine.wrapped_key));
     const contentKey = await crypto.subtle.importKey("raw", rawContentKey, { name: "AES-GCM" }, false, ["decrypt"]);
-    const plainBuf = await crypto.subtle.decrypt({ name: "AES-GCM", iv: b64decode(msg.enc_iv) }, contentKey, b64decode(msg.content));
+    const plainBuf = await crypto.subtle.decrypt({ name: "AES-GCM", iv: b64decode(msg.enc_iv), ...(aad ? { additionalData: aad } : {}) }, contentKey, b64decode(msg.content));
     return new TextDecoder().decode(plainBuf);
   } catch {
     return null;
@@ -314,7 +408,7 @@ async function decryptNow(msg: { content: string; enc_iv?: string | null; enc_ke
 // was turned on. The Android app uses the same format.
 
 const BACKUP_DEVICE_ID = "backup";
-const PBKDF2_ITERATIONS = 310_000;
+const PBKDF2_ITERATIONS = 600_000;
 const backupRecordKey = (userID: number) => `backup:${userID}`;
 
 interface KeyBackupData {
@@ -401,6 +495,10 @@ export async function restoreKeyBackup(password: string): Promise<void> {
   const status = await api.keyBackup();
   if (!status.exists || !status.data) throw new Error("There is no backup for this account");
   const d = status.data as KeyBackupData;
+  // Never trust KDF cost from the server: too low weakens, too high hangs the tab.
+  if (!Number.isInteger(d.iterations) || d.iterations < 100_000 || d.iterations > 10_000_000) {
+    throw new Error("The backup uses unsupported key-derivation settings");
+  }
   const key = await passwordKey(password, b64decode(d.salt), d.iterations);
   let pkcs8: ArrayBuffer;
   try {
