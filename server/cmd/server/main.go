@@ -2,10 +2,10 @@ package main
 
 import (
 	"context"
+	"crypto/hmac"
 	"crypto/rand"
-	"crypto/rsa"
+	"crypto/sha256"
 	"crypto/x509"
-	"crypto/x509/pkix"
 	"encoding/hex"
 	"encoding/pem"
 	"flag"
@@ -13,12 +13,12 @@ import (
 	"io/fs"
 	"log"
 	"log/slog"
-	"math/big"
 	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -161,7 +161,7 @@ func main() {
 			ClientID:     sv.OIDCClientID,
 			ClientSecret: sv.OIDCClientSecret,
 			RedirectURL:  redirect,
-			JWTSecret:    cfg.JWTSecret,
+			JWTSecret:    deriveKey(cfg.JWTSecret, "oidc-state"),
 		}); err != nil {
 			lg.Error("failed to initialize OIDC; SSO disabled", "err", err)
 			oidcMgr = nil
@@ -173,7 +173,7 @@ func main() {
 
 	cleanupStop := make(chan struct{})
 	defer close(cleanupStop)
-	go runPeriodicCleanup(dbh, apiHandler, lg, cleanupStop)
+	go runPeriodicCleanup(dbh, apiHandler, cfg.DataDir, lg, cleanupStop)
 	if dbh.Dialect() == db.DialectSQLite {
 		go runDailySnapshots(dbh, cfg.DataDir, lg, cleanupStop)
 	}
@@ -192,10 +192,7 @@ func main() {
 	r.Get("/ws", hub.HandleWS)
 
 	r.Get("/cert.pem", func(w http.ResponseWriter, req *http.Request) {
-		certPath := cfg.TLSCert
-		if certPath == "" {
-			certPath = filepath.Join(cfg.DataDir, "cert.pem")
-		}
+		certPath := config.TrustCertPath(cfg)
 		if _, err := os.Stat(certPath); err != nil {
 			http.Error(w, "Certificate not found on server", http.StatusNotFound)
 			return
@@ -366,7 +363,7 @@ func runDailySnapshots(dbh *db.DB, dataDir string, lg *slog.Logger, stop <-chan 
 // long-uptime LAN server that means unbounded growth between restarts, and
 // (for reset tokens specifically) a slower ConsumePasswordResetToken scan
 // the longer the server has been running.
-func runPeriodicCleanup(dbh *db.DB, apiHandler *api.API, lg *slog.Logger, stop <-chan struct{}) {
+func runPeriodicCleanup(dbh *db.DB, apiHandler *api.API, dataDir string, lg *slog.Logger, stop <-chan struct{}) {
 	ticker := time.NewTicker(15 * time.Minute)
 	defer ticker.Stop()
 	for {
@@ -380,6 +377,11 @@ func runPeriodicCleanup(dbh *db.DB, apiHandler *api.API, lg *slog.Logger, stop <
 			}
 			apiHandler.CleanupOrphanFiles()
 			apiHandler.PurgeOldMessages()
+			// Audit rows and old pre-restore copies must not grow forever.
+			if err := dbh.PruneAudit(time.Now().AddDate(-1, 0, 0).UTC().Format(time.RFC3339)); err != nil {
+				lg.Warn("periodic cleanup: prune audit log", "err", err)
+			}
+			backup.PrunePreRestore(dataDir, 30*24*time.Hour)
 		case <-stop:
 			return
 		}
@@ -510,15 +512,36 @@ func securityHeaders(next http.Handler) http.Handler {
 		w.Header().Set("Content-Security-Policy",
 			"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "+
 				"img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; "+
-				"font-src 'self'; frame-ancestors 'none'")
+				"font-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'")
+		if r.TLS != nil {
+			w.Header().Set("Strict-Transport-Security", "max-age=31536000")
+		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+var bootstrapNameRE = regexp.MustCompile(`^[a-z0-9._-]{2,32}$`)
+
+// deriveKey gives each purpose its own key from the master secret, so a
+// token minted for one use can never be valid for another.
+func deriveKey(master []byte, purpose string) []byte {
+	mac := hmac.New(sha256.New, master)
+	mac.Write([]byte(purpose))
+	return mac.Sum(nil)
 }
 
 func bootstrapAdmin(cfg *config.Config, dbh *db.DB, lg *slog.Logger) {
 	count, err := dbh.CountUsers()
 	if err != nil || count > 0 {
 		return
+	}
+
+	// Login lowercases usernames, so the first account must be stored in the
+	// same form and satisfy the same rules as any other, or nobody can sign in.
+	cfg.BootstrapAdminUser = strings.ToLower(strings.TrimSpace(cfg.BootstrapAdminUser))
+	if !bootstrapNameRE.MatchString(cfg.BootstrapAdminUser) {
+		lg.Warn("BOOTSTRAP_ADMIN_USER is not a valid username (2-32 letters, digits, . _ -); using \"admin\"", "was", cfg.BootstrapAdminUser)
+		cfg.BootstrapAdminUser = "admin"
 	}
 
 	password := cfg.BootstrapAdminPassword
@@ -539,9 +562,15 @@ func bootstrapAdmin(cfg *config.Config, dbh *db.DB, lg *slog.Logger) {
 		os.Exit(1)
 	}
 
-	if _, err := dbh.CreateUser(cfg.BootstrapAdminUser, cfg.BootstrapAdminUser, hash, "admin"); err != nil {
+	admin, err := dbh.CreateUser(cfg.BootstrapAdminUser, cfg.BootstrapAdminUser, hash, "admin")
+	if err != nil {
 		lg.Error("create bootstrap admin account", "err", err)
 		os.Exit(1)
+	}
+	// A generated password is shown in the logs, so it must be replaced at
+	// first sign-in.
+	if generated {
+		_ = dbh.SetMustChangePassword(admin.ID, true)
 	}
 
 	lg.Info("bootstrap admin account created", "username", cfg.BootstrapAdminUser)
@@ -554,96 +583,20 @@ func bootstrapAdmin(cfg *config.Config, dbh *db.DB, lg *slog.Logger) {
 	}
 }
 
-// ensureSelfSignedCert reuses the existing self-signed cert as long as it
-// still covers every address this machine currently has. LAN/VPN boxes
-// routinely change subnet (a new DHCP lease, moving to a different network,
-// a VPN interface appearing later) - checking existence alone would leave a
-// stale cert that silently stops covering the machine's real address, so
-// every boot compares the cert's SANs against localCertificateNames() and
-// regenerates (extending, not shrinking, the SAN set) the moment they drift.
-func ensureSelfSignedCert(dataDir string, extraHosts []string, lg *slog.Logger) (certPath, keyPath string, err error) {
-	certPath = filepath.Join(dataDir, "cert.pem")
-	keyPath = filepath.Join(dataDir, "key.pem")
-
-	dnsNames, ipAddresses := localCertificateNames(extraHosts...)
-
-	if existing, certErr := loadExistingCertNames(certPath); certErr == nil {
-		if _, keyErr := os.Stat(keyPath); keyErr == nil {
-			expiringSoon := time.Now().After(existing.notAfter.Add(-30 * 24 * time.Hour))
-			if existing.covers(dnsNames, ipAddresses) && !expiringSoon {
-				return certPath, keyPath, nil // still covers every current address and isn't about to expire
-			}
-			if expiringSoon {
-				lg.Info("self-signed certificate expires within 30 days; regenerating", "expires", existing.notAfter)
-			} else {
-				lg.Info("machine's network addresses changed since the certificate was generated; regenerating to cover the new ones",
-					"dns", dnsNames, "ip", ipAddressStrings(ipAddresses))
-			}
-			// Keep any previously-covered names too, so devices that only
-			// ever reached this server over an older address (e.g. a VPN
-			// peer on a different subnet than the one just detected) aren't
-			// dropped from the new certificate.
-			dnsNames = mergeDNS(existing.dns, dnsNames)
-			ipAddresses = mergeIPs(existing.ips, ipAddresses)
-		}
-	}
-
-	priv, err := rsa.GenerateKey(rand.Reader, 2048)
-	if err != nil {
-		return "", "", err
-	}
-
-	serial, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 62))
-	if err != nil {
-		return "", "", err
-	}
-	template := x509.Certificate{
-		SerialNumber: serial,
-		Subject: pkix.Name{
-			Organization: []string{"Vision Call (Self-Signed)"},
-			CommonName:   "Vision Call LAN Root CA",
-		},
-		NotBefore:             time.Now().Add(-5 * time.Minute),
-		NotAfter:              time.Now().Add(365 * 24 * time.Hour),
-		IsCA:                  true,
-		MaxPathLen:            0,
-		MaxPathLenZero:        true,
-		KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
-		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
-		BasicConstraintsValid: true,
-		DNSNames:              dnsNames,
-		IPAddresses:           ipAddresses,
-	}
-
-	derBytes, err := x509.CreateCertificate(rand.Reader, &template, &template, &priv.PublicKey, priv)
-	if err != nil {
-		return "", "", err
-	}
-
-	privBytes, err := x509.MarshalPKCS8PrivateKey(priv)
-	if err != nil {
-		return "", "", err
-	}
-	if err := os.WriteFile(certPath, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: derBytes}), 0o644); err != nil {
-		return "", "", err
-	}
-	if err := os.WriteFile(keyPath, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: privBytes}), 0o600); err != nil {
-		_ = os.Remove(certPath)
-		return "", "", err
-	}
-
-	return certPath, keyPath, nil
-}
-
 // certNames is the SAN set read back out of an existing certificate on disk.
 type certNames struct {
 	dns      []string
 	ips      []net.IP
 	notAfter time.Time
+	cert     *x509.Certificate
 }
 
 // covers reports whether every one of the machine's current addresses is
 // already present in the certificate's existing SAN list.
+func (c certNames) signedBy(ca *x509.Certificate) bool {
+	return c.cert != nil && c.cert.CheckSignatureFrom(ca) == nil
+}
+
 func (c certNames) covers(dnsNames []string, ipAddresses []net.IP) bool {
 	dnsSet := map[string]bool{}
 	for _, d := range c.dns {
@@ -681,7 +634,7 @@ func loadExistingCertNames(certPath string) (certNames, error) {
 	if err != nil {
 		return certNames{}, err
 	}
-	return certNames{dns: cert.DNSNames, ips: cert.IPAddresses, notAfter: cert.NotAfter}, nil
+	return certNames{dns: cert.DNSNames, ips: cert.IPAddresses, notAfter: cert.NotAfter, cert: cert}, nil
 }
 
 func mergeDNS(a, b []string) []string {

@@ -20,6 +20,9 @@ import (
 // restore has been staged (it is applied while the server starts up).
 func (a *API) SetRestart(fn func()) { a.restart = fn }
 
+// maxRestoreBytes bounds an uploaded restore file.
+const maxRestoreBytes = 16 << 30
+
 func (a *API) backupsSupported(w http.ResponseWriter) bool {
 	if a.db.Dialect() != db.DialectSQLite {
 		writeErr(w, http.StatusBadRequest, "backups here only cover the built-in database; use pg_dump or mysqldump for Postgres or MySQL")
@@ -51,7 +54,10 @@ func (a *API) handleCreateSnapshot(w http.ResponseWriter, r *http.Request) {
 	}
 	s, err := backup.TakeSnapshot(a.db, a.cfg.DataDir)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "could not create backup: "+err.Error())
+		if a.log != nil {
+			a.log.Error("snapshot failed", "err", err)
+		}
+		writeErr(w, http.StatusInternalServerError, "could not create backup")
 		return
 	}
 	a.audit(r, "backup_create", "backup", nil, s.Name)
@@ -67,6 +73,7 @@ func (a *API) handleDownloadSnapshot(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, err.Error())
 		return
 	}
+	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(transferDeadline))
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filepath.Base(path)))
 	http.ServeFile(w, r, path)
@@ -78,19 +85,36 @@ func (a *API) handleDownloadFull(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := "visioncall-backup-" + time.Now().Format("2006-01-02-1504") + ".zip"
+	rc := http.NewResponseController(w)
+	_ = rc.SetWriteDeadline(time.Now().Add(transferDeadline))
+	// Build the zip on disk first: a failure then becomes a clean 500 instead
+	// of a truncated archive behind an already-sent 200.
+	tmp, err := os.CreateTemp(a.cfg.DataDir, "backup-*.zip")
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "could not create backup")
+		return
+	}
+	defer os.Remove(tmp.Name())
+	defer tmp.Close()
+	if err := backup.WriteFull(tmp, a.db, a.cfg.DataDir, config.Version); err != nil {
+		if a.log != nil {
+			a.log.Error("full backup failed", "err", err)
+		}
+		writeErr(w, http.StatusInternalServerError, "could not create backup")
+		return
+	}
+	a.audit(r, "backup_download", "backup", nil, name)
 	w.Header().Set("Content-Type", "application/zip")
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, name))
-	a.audit(r, "backup_download", "backup", nil, name)
-	if err := backup.WriteFull(w, a.db, a.cfg.DataDir, config.Version); err != nil && a.log != nil {
-		// Headers are already sent; the download just ends early.
-		a.log.Error("full backup failed", "err", err)
-	}
+	http.ServeContent(w, r, name, time.Now(), tmp)
 }
 
 func (a *API) handleRestoreSnapshot(w http.ResponseWriter, r *http.Request) {
 	if !a.backupsSupported(w) {
 		return
 	}
+	a.restoreMu.Lock()
+	defer a.restoreMu.Unlock()
 	path, err := backup.SnapshotPath(a.cfg.DataDir, chi.URLParam(r, "name"))
 	if err != nil {
 		writeErr(w, http.StatusNotFound, err.Error())
@@ -108,6 +132,10 @@ func (a *API) handleRestoreUpload(w http.ResponseWriter, r *http.Request) {
 	if !a.backupsSupported(w) {
 		return
 	}
+	a.restoreMu.Lock()
+	defer a.restoreMu.Unlock()
+	_ = http.NewResponseController(w).SetReadDeadline(time.Now().Add(transferDeadline))
+	r.Body = http.MaxBytesReader(w, r.Body, maxRestoreBytes)
 	mr, err := r.MultipartReader()
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, "upload a backup file")

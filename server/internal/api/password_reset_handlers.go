@@ -58,7 +58,14 @@ func (a *API) handlePasswordResetRequest(w http.ResponseWriter, r *http.Request)
 	// Reuses the login limiter's storage under a distinct key namespace so a
 	// flood of reset requests for one email/IP can't spam that inbox or hammer
 	// the SMTP relay.
-	key := "reset|" + *email + "|" + RealIP(r, a.settings.Get().TrustProxy)
+	ip := RealIP(r, a.settings.Get().TrustProxy)
+	// Three independent caps: per source IP (any email), per target email
+	// (any source, so a botnet can't flood one inbox), and per pair.
+	if !a.ipLimiter.Reserve("resetip|"+ip) || !a.limiter.Reserve("reset|"+*email) {
+		writeJSON(w, http.StatusOK, map[string]string{"message": generic})
+		return
+	}
+	key := "reset|" + *email + "|" + ip
 	if !a.limiter.Reserve(key) { // counts toward the same 5-per-15min window as failed logins
 		writeJSON(w, http.StatusOK, map[string]string{"message": generic})
 		return

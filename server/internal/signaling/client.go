@@ -1,7 +1,9 @@
 package signaling
 
 import (
+	"errors"
 	"encoding/json"
+	"strings"
 	"log/slog"
 	"sync"
 	"sync/atomic"
@@ -9,6 +11,7 @@ import (
 
 	"github.com/gorilla/websocket"
 
+	"visioncall/internal/auth"
 	"visioncall/internal/db"
 )
 
@@ -78,6 +81,32 @@ type Client struct {
 	sessionID string
 	// host is the Host header the browser used to reach the server.
 	host string
+	// token is the raw session cookie, kept to re-validate the session while
+	// the socket stays open.
+	token   string
+	advOnce sync.Once
+	adv     string
+}
+
+// revalidate re-checks the session behind a long-lived socket. A revoked or
+// expired session is kicked; a changed role or newly forced password change
+// drops the socket so the client reconnects with fresh account state.
+func (c *Client) revalidate() {
+	if c.token == "" || c.finishing.Load() {
+		return
+	}
+	ttl := time.Duration(c.hub.settings.Get().SessionTTLHours) * time.Hour
+	user, err := auth.ValidateSession(c.hub.db, c.hub.cfg.JWTSecret, c.token, ttl)
+	if err != nil {
+		// Transient database errors must not sign anyone out.
+		if errors.Is(err, db.ErrNotFound) || strings.HasPrefix(err.Error(), "auth:") {
+			c.Kick("signed_out")
+		}
+		return
+	}
+	if user.Role != c.user.Role || user.MustChangePassword || user.DisplayName != c.user.DisplayName {
+		c.close()
+	}
 }
 
 func (c *Client) status() string {
@@ -172,6 +201,7 @@ func (c *Client) writePump() {
 				c.log.Debug("ws: ping error", "err", err)
 				return
 			}
+			c.revalidate()
 		}
 	}
 }

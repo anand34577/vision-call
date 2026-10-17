@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"time"
+	"unicode/utf8"
 )
 
 type User struct {
@@ -63,6 +64,9 @@ type UserBrief struct {
 }
 
 var ErrNotFound = errors.New("not found")
+
+// ErrTooMany means a per-user row cap was hit.
+var ErrTooMany = errors.New("too many items")
 
 const userCols = `id, username, display_name, password_hash, role, avatar_file_id, email, disabled, deleted, created_at, oidc_issuer, oidc_subject, status_text, must_change_password, totp_secret`
 
@@ -142,6 +146,11 @@ func (d *DB) GetUserByEmail(email string) (*User, error) {
 		return nil, ErrNotFound
 	}
 	return u, nil
+}
+
+// GetUserByEmailAny finds an account by email regardless of its state.
+func (d *DB) GetUserByEmailAny(email string) (*User, error) {
+	return scanUser(d.QueryRow(`SELECT `+userCols+` FROM users WHERE email = ?`, email))
 }
 
 // EmailTaken reports whether any account (enabled or not) already has this
@@ -343,6 +352,18 @@ func (d *DB) AnonymizeUser(id int64) error {
 	if err != nil {
 		return err
 	}
+	// Drop everything else that identifies or secures the old account.
+	for _, q := range []string{
+		`UPDATE users SET totp_secret = '', status_text = '' WHERE id = ?`,
+		`DELETE FROM user_devices WHERE user_id = ?`,
+		`DELETE FROM key_backups WHERE user_id = ?`,
+		`DELETE FROM user_preferences WHERE user_id = ?`,
+		`DELETE FROM sessions WHERE user_id = ?`,
+	} {
+		if _, err := d.Exec(q, id); err != nil {
+			return err
+		}
+	}
 	return d.DeletePasswordResetTokensForUser(id)
 }
 
@@ -413,6 +434,10 @@ func (d *DB) PurgeUser(id int64) error {
 func (d *DB) CreateSession(sessionID string, userID int64, tokenHash string, expires time.Time, userAgent, ip string) error {
 	if len(userAgent) > 255 {
 		userAgent = userAgent[:255]
+		// Don't leave a split multi-byte rune: Postgres rejects invalid UTF-8.
+		for len(userAgent) > 0 && !utf8.ValidString(userAgent) {
+			userAgent = userAgent[:len(userAgent)-1]
+		}
 	}
 	_, err := d.Exec(`INSERT INTO sessions (id, user_id, token_hash, created_at, expires_at, user_agent, ip, last_seen) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 		sessionID, userID, tokenHash, now(), expires.UTC().Format(time.RFC3339), userAgent, ip, now())
@@ -519,7 +544,11 @@ func (d *DB) CreatePasswordResetToken(userID int64, ttl time.Duration) (rawToken
 		return "", err
 	}
 	rawToken = hex.EncodeToString(buf)
-	id := hex.EncodeToString(buf[:8])
+	idBuf := make([]byte, 8)
+	if _, err = rand.Read(idBuf); err != nil {
+		return "", err
+	}
+	id := hex.EncodeToString(idBuf) // independent of the secret token
 	_, err = d.Exec(`INSERT INTO password_reset_tokens (id, user_id, token_hash, created_at, expires_at) VALUES (?, ?, ?, ?, ?)`,
 		id, userID, hashResetToken(rawToken), now(), time.Now().UTC().Add(ttl).Format(time.RFC3339))
 	if err != nil {

@@ -39,10 +39,14 @@ services:
       --fingerprint
       --lt-cred-mech
       --use-auth-secret
-      --static-auth-secret=${TURN_SECRET:-}
+      --static-auth-secret=${TURN_SECRET:?set TURN_SECRET in .env to use the TURN relay}
       --listening-port=3478
       --min-port=49160
-      --max-port=49200
+      --max-port=49400
+      --no-multicast-peers
+      --denied-peer-ip=0.0.0.0-0.255.255.255
+      --denied-peer-ip=127.0.0.0-127.255.255.255
+      --denied-peer-ip=169.254.0.0-169.254.255.255
       --external-ip=${EXTERNAL_IP:-}
       --no-cli
       --no-tls

@@ -13,7 +13,10 @@ import (
 // loaded from. That is what lets group calls work without EXTERNAL_IP, even
 // in a Docker bridge network where the server only knows its container IP.
 // Returns "" when the host can't be resolved.
-func (c *Client) advertiseIP() string { return hostToIP(c.host) }
+func (c *Client) advertiseIP() string {
+	c.advOnce.Do(func() { c.adv = hostToIP(c.host) })
+	return c.adv
+}
 
 func hostToIP(host string) string {
 	if h, _, err := net.SplitHostPort(host); err == nil {

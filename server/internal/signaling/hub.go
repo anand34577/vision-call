@@ -45,6 +45,11 @@ type Hub struct {
 	roomLeaveTokens map[int64]uint64
 	callStateMu     sync.Mutex
 
+	// ejected remembers who the host removed from a live room, so a kicked
+	// participant can't simply rejoin. Cleared when the room closes.
+	ejMu    sync.Mutex
+	ejected map[string]map[int64]bool
+
 	p2p          *p2pManager
 	privateRooms *privateRoomGate
 	// passcodes throttles wrong private-room passcodes per (user, room) —
@@ -93,7 +98,14 @@ func NewHub(cfg *config.Config, dbh *db.DB, log *slog.Logger, settingsStore *set
 			CheckOrigin: func(r *http.Request) bool {
 				// Same-origin only; absent Origin (native clients / curl) is allowed.
 				origin := r.Header.Get("Origin")
-				return origin == "" || origin == "http://"+r.Host || origin == "https://"+r.Host
+				if origin == "" || origin == "http://"+r.Host || origin == "https://"+r.Host {
+					return true
+				}
+				// Same rule as the HTTP origin check: a proxy may rewrite Host.
+				if fh := r.Header.Get("X-Forwarded-Host"); fh != "" && (origin == "http://"+fh || origin == "https://"+fh) {
+					return true
+				}
+				return false
 			},
 		},
 	}
@@ -139,6 +151,15 @@ func (h *Hub) HandleWS(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "account disabled", http.StatusForbidden)
 		return
 	}
+	// A forced password change blocks the realtime channel as well as REST.
+	if user.MustChangePassword {
+		http.Error(w, "password change required", http.StatusForbidden)
+		return
+	}
+	if len(h.allConns(user.ID)) >= maxConnsPerUser {
+		http.Error(w, "too many connections", http.StatusTooManyRequests)
+		return
+	}
 
 	conn, err := h.upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -157,11 +178,39 @@ func (h *Hub) HandleWS(w http.ResponseWriter, r *http.Request) {
 		deviceID:  r.URL.Query().Get("device"),
 		host:      r.Host,
 		sessionID: claims.SessionID,
+		token:     cookie.Value,
 	}
 	h.register(c)
 	clog.Info("ws: connected")
 	go c.writePump()
 	go c.readPump()
+}
+
+// maxConnsPerUser caps simultaneous sockets per account (devices + tabs).
+const maxConnsPerUser = 10
+
+func (h *Hub) markEjected(roomID string, userID int64) {
+	h.ejMu.Lock()
+	defer h.ejMu.Unlock()
+	if h.ejected == nil {
+		h.ejected = map[string]map[int64]bool{}
+	}
+	if h.ejected[roomID] == nil {
+		h.ejected[roomID] = map[int64]bool{}
+	}
+	h.ejected[roomID][userID] = true
+}
+
+func (h *Hub) isEjected(roomID string, userID int64) bool {
+	h.ejMu.Lock()
+	defer h.ejMu.Unlock()
+	return h.ejected[roomID][userID]
+}
+
+func (h *Hub) clearEjected(roomID string) {
+	h.ejMu.Lock()
+	delete(h.ejected, roomID)
+	h.ejMu.Unlock()
 }
 
 func realIP(r *http.Request, trustProxy bool) string { return auth.RealIP(r, trustProxy) }

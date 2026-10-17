@@ -6,9 +6,11 @@ package oidc
 
 import (
 	"context"
+	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -46,6 +48,15 @@ type stateClaims struct {
 	jwt.RegisteredClaims
 }
 
+// pkceVerifier derives the PKCE code_verifier from the browser binding cookie
+// (known only to the starting browser) keyed with the server secret, so it
+// needs no server-side storage and never appears in a URL.
+func (m *Manager) pkceVerifier(binding string) string {
+	mac := hmac.New(sha256.New, m.jwtSecret)
+	mac.Write([]byte("pkce|" + binding))
+	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+}
+
 func bindHash(binding string) string {
 	sum := sha256.Sum256([]byte(binding))
 	return hex.EncodeToString(sum[:])
@@ -58,6 +69,9 @@ type Identity struct {
 	Subject string
 	Email   string
 	Name    string
+	// EmailVerified is the IdP's email_verified claim; unverified addresses
+	// must not be trusted for usernames or account recovery.
+	EmailVerified bool
 }
 
 // Manager's provider discovery (a network call to the IdP) happens either
@@ -210,7 +224,7 @@ func (m *Manager) AuthURL(flow Flow, linkUserID int64, binding string) (string, 
 	if err != nil {
 		return "", err
 	}
-	return cfg.AuthCodeURL(state, gooidc.Nonce(nonce)), nil
+	return cfg.AuthCodeURL(state, gooidc.Nonce(nonce), oauth2.S256ChallengeOption(m.pkceVerifier(binding))), nil
 }
 
 // Result is what a successful callback exchange yields: the verified
@@ -246,7 +260,7 @@ func (m *Manager) Exchange(ctx context.Context, code, state, binding string) (*R
 		return nil, errors.New("oidc: login was not started from this browser")
 	}
 
-	oauth2Token, err := cfg.Exchange(ctx, code)
+	oauth2Token, err := cfg.Exchange(ctx, code, oauth2.VerifierOption(m.pkceVerifier(binding)))
 	if err != nil {
 		return nil, fmt.Errorf("oidc: code exchange failed: %w", err)
 	}
@@ -263,8 +277,9 @@ func (m *Manager) Exchange(ctx context.Context, code, state, binding string) (*R
 	}
 
 	var std struct {
-		Email string `json:"email"`
-		Name  string `json:"name"`
+		Email         string `json:"email"`
+		EmailVerified bool   `json:"email_verified"`
+		Name          string `json:"name"`
 	}
 	if err := idToken.Claims(&std); err != nil {
 		return nil, fmt.Errorf("oidc: reading claims: %w", err)
@@ -276,6 +291,7 @@ func (m *Manager) Exchange(ctx context.Context, code, state, binding string) (*R
 			Subject: idToken.Subject,
 			Email:   std.Email,
 			Name:    std.Name,
+			EmailVerified: std.EmailVerified,
 		},
 		Flow:       claims.Flow,
 		LinkUserID: claims.LinkUserID,

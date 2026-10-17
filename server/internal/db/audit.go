@@ -1,6 +1,9 @@
 package db
 
-import "database/sql"
+import (
+	"database/sql"
+	"unicode/utf8"
+)
 
 // AuditEntry is one row of the audit trail: who did what to what, and from
 // where. ActorName/TargetType/Detail are free-form but kept short and
@@ -20,6 +23,7 @@ type AuditEntry struct {
 // WriteAudit appends one audit row. actorID is nil for unauthenticated
 // actions (e.g. a failed login attempt).
 func (d *DB) WriteAudit(actorID *int64, actorName, action, targetType string, targetID *int64, detail, ip string) error {
+	actorName, detail, ip = clip(actorName, 64), clip(detail, 500), clip(ip, 64)
 	_, err := d.Exec(`INSERT INTO audit_log (actor_id, actor_name, action, target_type, target_id, detail, ip, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 		recID(actorID), actorName, action, targetType, recID(targetID), detail, ip, now())
@@ -79,4 +83,23 @@ func (d *DB) ListAudit(f AuditFilter) ([]*AuditEntry, error) {
 		out = append(out, e)
 	}
 	return out, rows.Err()
+}
+
+// clip shortens attacker-influenced strings (login names, details) so the
+// audit table can't be used as a storage amplifier; it never splits a rune.
+func clip(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	s = s[:max]
+	for len(s) > 0 && !utf8.ValidString(s) {
+		s = s[:len(s)-1]
+	}
+	return s
+}
+
+// PruneAudit deletes audit rows older than cutoff (RFC3339).
+func (d *DB) PruneAudit(cutoff string) error {
+	_, err := d.Exec(`DELETE FROM audit_log WHERE created_at < ?`, cutoff)
+	return err
 }

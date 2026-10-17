@@ -77,7 +77,17 @@ func (a *API) handleTOTPSetup(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "could not generate secret")
 		return
 	}
+	a.totpMu.Lock()
+	a.totpPending[me.ID] = pendingTOTP{secret: secret, expires: time.Now().Add(10 * time.Minute)}
+	a.totpMu.Unlock()
 	writeJSON(w, http.StatusOK, map[string]string{"secret": secret, "uri": auth.TOTPURI(secret, me.Username)})
+}
+
+// pendingTOTP is a secret handed out by handleTOTPSetup. Only that exact
+// secret can be enabled, so a client can't pick its own (weak or known) one.
+type pendingTOTP struct {
+	secret  string
+	expires time.Time
 }
 
 func (a *API) handleTOTPEnable(w http.ResponseWriter, r *http.Request) {
@@ -86,10 +96,25 @@ func (a *API) handleTOTPEnable(w http.ResponseWriter, r *http.Request) {
 		Secret string `json:"secret"`
 		Code   string `json:"code"`
 	}
-	if err := readJSON(r, &req); err != nil || !auth.VerifyTOTP(req.Secret, req.Code, time.Now()) {
+	if err := readJSON(r, &req); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	a.totpMu.Lock()
+	pend, havePend := a.totpPending[me.ID]
+	a.totpMu.Unlock()
+	if !havePend || time.Now().After(pend.expires) || req.Secret != pend.secret {
+		writeErr(w, http.StatusBadRequest, "start two-factor setup again")
+		return
+	}
+	_, ok := auth.VerifyTOTPStep(req.Secret, req.Code, time.Now())
+	if !ok {
 		writeErr(w, http.StatusBadRequest, "that code is not valid — check your authenticator app and try again")
 		return
 	}
+	a.totpMu.Lock()
+	delete(a.totpPending, me.ID)
+	a.totpMu.Unlock()
 	if err := a.db.SetTOTPSecret(me.ID, req.Secret); err != nil {
 		writeErr(w, http.StatusInternalServerError, "could not enable two-factor")
 		return

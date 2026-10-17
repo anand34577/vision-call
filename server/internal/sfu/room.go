@@ -162,6 +162,7 @@ func (r *Room) remove(userID int64) {
 	if wasHost && len(order) > 0 {
 		if np, ok := r.participants[order[0]]; ok {
 			np.info.Host = true
+			np.info.CanPresent = r.canPresentLocked(order[0], true)
 			info := np.info
 			promotedInfo = &info
 		}

@@ -1,6 +1,7 @@
 package db
 
 import (
+	"context"
 	"database/sql"
 	"embed"
 	"fmt"
@@ -53,7 +54,12 @@ func Open(driver, dsn string) (*DB, error) {
 		sqldb, err = sql.Open("mysql", dsn)
 	default:
 		dialect = DialectSQLite
-		path := "file:" + filepath.ToSlash(dsn) + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)&_pragma=synchronous(NORMAL)"
+		// Percent-escape characters special in a file: URI so a data directory
+		// containing %, ? or # opens the right file. _txlock=immediate takes the
+		// write lock up front, so read-then-write transactions wait on
+		// busy_timeout instead of failing with SQLITE_BUSY on lock upgrade.
+		esc := strings.NewReplacer("%", "%25", "?", "%3f", "#", "%23").Replace(filepath.ToSlash(dsn))
+		path := "file:" + esc + "?_txlock=immediate&_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)&_pragma=synchronous(NORMAL)"
 		sqldb, err = sql.Open("sqlite", path)
 	}
 	if err != nil {
@@ -97,6 +103,28 @@ func Open(driver, dsn string) (*DB, error) {
 }
 
 func (d *DB) migrate() error {
+	// Two servers starting together against one Postgres/MySQL database must
+	// not both run the same migration: hold a database-level lock meanwhile.
+	if d.dialect != DialectSQLite {
+		ctx := context.Background()
+		conn, err := d.DB.Conn(ctx)
+		if err != nil {
+			return err
+		}
+		defer conn.Close()
+		lock, unlock := `SELECT pg_advisory_lock(727274)`, `SELECT pg_advisory_unlock(727274)`
+		if d.dialect == DialectMySQL {
+			lock, unlock = `SELECT GET_LOCK('visioncall_migrate', 120)`, `SELECT RELEASE_LOCK('visioncall_migrate')`
+		}
+		if _, err := conn.ExecContext(ctx, lock); err != nil {
+			return err
+		}
+		defer conn.ExecContext(ctx, unlock)
+	}
+	return d.migrateLocked()
+}
+
+func (d *DB) migrateLocked() error {
 	if _, err := d.Exec(`CREATE TABLE IF NOT EXISTS schema_migrations (version VARCHAR(191) PRIMARY KEY, applied_at VARCHAR(64) NOT NULL)`); err != nil {
 		return err
 	}

@@ -30,6 +30,33 @@ func (d *DB) UpsertDeviceKey(userID int64, deviceID, publicKeyJWK string) error 
 	return err
 }
 
+func (d *DB) CountDeviceKeys(userID int64) (int, error) {
+	var n int
+	err := d.QueryRow(`SELECT COUNT(*) FROM user_devices WHERE user_id = ?`, userID).Scan(&n)
+	return n, err
+}
+
+func (d *DB) HasDeviceKey(userID int64, deviceID string) bool {
+	var n int
+	return d.QueryRow(`SELECT COUNT(*) FROM user_devices WHERE user_id = ? AND device_id = ?`, userID, deviceID).Scan(&n) == nil && n > 0
+}
+
+// DeleteOldestDeviceKey drops the user's oldest regular device (never the
+// key-backup pseudo-device).
+func (d *DB) DeleteOldestDeviceKey(userID int64) error {
+	var dev string
+	err := d.QueryRow(`SELECT device_id FROM user_devices WHERE user_id = ? AND device_id <> ? ORDER BY created_at ASC LIMIT 1`, userID, BackupDeviceID).Scan(&dev)
+	if err != nil {
+		return err
+	}
+	return d.DeleteDeviceKey(userID, dev)
+}
+
+func (d *DB) DeleteDeviceKey(userID int64, deviceID string) error {
+	_, err := d.Exec(`DELETE FROM user_devices WHERE user_id = ? AND device_id = ?`, userID, deviceID)
+	return err
+}
+
 // DeviceKeysForUsers returns every registered device key for the given
 // users — the fan-out list a sender encrypts a message's content key to.
 func (d *DB) DeviceKeysForUsers(userIDs []int64) ([]DeviceKey, error) {

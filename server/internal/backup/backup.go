@@ -251,12 +251,19 @@ func extract(f *zip.File, dest string) error {
 	if err != nil {
 		return err
 	}
-	if _, err := io.Copy(out, src); err != nil {
+	// Bound decompressed size so a zip bomb can't fill the disk.
+	n, err := io.Copy(out, io.LimitReader(src, maxEntryBytes+1))
+	if err == nil && n > maxEntryBytes {
+		err = fmt.Errorf("backup entry %s is too large", f.Name)
+	}
+	if err != nil {
 		out.Close()
 		return err
 	}
 	return out.Close()
 }
+
+const maxEntryBytes = 32 << 30
 
 func freshStaging(dataDir string) (string, error) {
 	staging := filepath.Join(dataDir, pendingDir)
@@ -314,22 +321,54 @@ func ApplyPending(dataDir string) (bool, error) {
 	if err := os.MkdirAll(keep, 0o755); err != nil {
 		return false, err
 	}
-	// Set the current data aside.
+	// Everything moved aside is recorded so a failure part-way can put the
+	// original data back instead of leaving the server with an empty database.
+	type move struct{ from, to string }
+	var done []move
+	rollback := func() {
+		for i := len(done) - 1; i >= 0; i-- {
+			_ = os.Rename(done[i].to, done[i].from)
+		}
+	}
+	aside := func(from, to string) bool {
+		if _, err := os.Stat(from); err != nil {
+			return true
+		}
+		if err := os.Rename(from, to); err != nil {
+			return false
+		}
+		done = append(done, move{from, to})
+		return true
+	}
 	for _, name := range []string{dbName, dbName + "-wal", dbName + "-shm", secretName} {
-		moveIfExists(filepath.Join(dataDir, name), filepath.Join(keep, name))
+		if !aside(filepath.Join(dataDir, name), filepath.Join(keep, name)) {
+			rollback()
+			return false, fmt.Errorf("could not set aside %s", name)
+		}
 	}
 	stagedFiles := filepath.Join(staging, "files")
 	_, zipHadFiles := os.Stat(stagedFiles)
 	if zipHadFiles == nil {
-		moveIfExists(filepath.Join(dataDir, "files"), filepath.Join(keep, "files"))
+		if !aside(filepath.Join(dataDir, "files"), filepath.Join(keep, "files")) {
+			rollback()
+			return false, fmt.Errorf("could not set aside the files folder")
+		}
 	}
 	// Move the backup in.
 	if err := os.Rename(filepath.Join(staging, dbName), filepath.Join(dataDir, dbName)); err != nil {
+		rollback()
 		return false, err
 	}
-	moveIfExists(filepath.Join(staging, secretName), filepath.Join(dataDir, secretName))
+	if _, err := os.Stat(filepath.Join(staging, secretName)); err == nil {
+		if err := os.Rename(filepath.Join(staging, secretName), filepath.Join(dataDir, secretName)); err != nil {
+			_ = os.Rename(filepath.Join(dataDir, dbName), filepath.Join(staging, dbName))
+			rollback()
+			return false, err
+		}
+	}
 	if zipHadFiles == nil {
 		if err := os.Rename(stagedFiles, filepath.Join(dataDir, "files")); err != nil {
+			rollback()
 			return false, err
 		}
 	}
@@ -358,4 +397,22 @@ func copyFile(from, to string) error {
 		return err
 	}
 	return dst.Close()
+}
+
+// PrunePreRestore removes pre-restore-* folders older than maxAge. They hold a
+// full copy of the replaced data, so keeping them forever grows the disk and
+// retains data an admin may believe is gone.
+func PrunePreRestore(dataDir string, maxAge time.Duration) {
+	entries, err := os.ReadDir(dataDir)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if !e.IsDir() || !strings.HasPrefix(e.Name(), "pre-restore-") {
+			continue
+		}
+		if info, err := e.Info(); err == nil && time.Since(info.ModTime()) > maxAge {
+			_ = os.RemoveAll(filepath.Join(dataDir, e.Name()))
+		}
+	}
 }

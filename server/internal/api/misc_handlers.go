@@ -113,9 +113,9 @@ func (a *API) handleAdminStats(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleMetrics exposes a small set of gauges in Prometheus's plain-text
-// exposition format, unauthenticated like /healthz (this is a LAN/VPN-only
-// intranet server — Prometheus doesn't send session cookies, and there's
-// nothing here an operator scraping their own network shouldn't see).
+// exposition format. It needs no session cookie but is gated by
+// metricsAllowed: a bearer token when METRICS_TOKEN is set, otherwise
+// loopback/private-network callers only.
 // Hand-written rather than pulling in client_golang: a handful of gauges
 // don't need a metrics library, just the format Prometheus already expects.
 func (a *API) handleMetrics(w http.ResponseWriter, r *http.Request) {
@@ -153,10 +153,7 @@ func (a *API) handleMetrics(w http.ResponseWriter, r *http.Request) {
 // handleDownloadCert allows LAN and mobile devices to download the server's public
 // TLS certificate (e.g. self-signed root CA) for easy installation into their trust stores.
 func (a *API) handleDownloadCert(w http.ResponseWriter, r *http.Request) {
-	certPath := a.cfg.TLSCert
-	if certPath == "" {
-		certPath = filepath.Join(a.cfg.DataDir, "cert.pem")
-	}
+	certPath := config.TrustCertPath(a.cfg)
 	if _, err := os.Stat(certPath); err != nil {
 		writeErr(w, http.StatusNotFound, "no certificate available on server")
 		return
@@ -174,6 +171,11 @@ func (a *API) metricsAllowed(r *http.Request) bool {
 	if sv.MetricsToken != "" {
 		got := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 		return subtle.ConstantTimeCompare([]byte(got), []byte(sv.MetricsToken)) == 1
+	}
+	// A forwarded request without TRUST_PROXY comes from a reverse proxy on
+	// this host (loopback source): treat it as external, not as local.
+	if !sv.TrustProxy && (r.Header.Get("X-Forwarded-For") != "" || r.Header.Get("X-Real-IP") != "") {
+		return false
 	}
 	ip := net.ParseIP(RealIP(r, sv.TrustProxy))
 	return ip != nil && (ip.IsLoopback() || ip.IsPrivate())

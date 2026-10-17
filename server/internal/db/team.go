@@ -373,3 +373,22 @@ func CleanPollOptions(in []string) []string {
 	}
 	return out
 }
+
+// ---- channel bans ---------------------------------------------------------
+
+// BanGroupMember records that userID was removed from a group by someone else,
+// so they can't rejoin a public channel on their own.
+func (d *DB) BanGroupMember(groupID, userID int64) error {
+	_, err := d.Exec(insertIgnoreSQL(d.dialect, `group_bans (group_id, user_id, created_at)`, `?, ?, ?`, `group_id, user_id`), groupID, userID, now())
+	return err
+}
+
+func (d *DB) UnbanGroupMember(groupID, userID int64) error {
+	_, err := d.Exec(`DELETE FROM group_bans WHERE group_id = ? AND user_id = ?`, groupID, userID)
+	return err
+}
+
+func (d *DB) IsGroupBanned(groupID, userID int64) bool {
+	var n int
+	return d.QueryRow(`SELECT COUNT(*) FROM group_bans WHERE group_id = ? AND user_id = ?`, groupID, userID).Scan(&n) == nil && n > 0
+}

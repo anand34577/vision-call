@@ -1,12 +1,37 @@
 package api
 
 import (
+	"encoding/json"
 	"net/http"
 	"strconv"
 	"strings"
 
+	"github.com/go-chi/chi/v5"
+
 	"visioncall/internal/auth"
+	"visioncall/internal/db"
 )
+
+// maxDevicesPerUser bounds how many device keys every sender must wrap a
+// message key for.
+const maxDevicesPerUser = 20
+
+// handleDeleteDeviceKey removes one of the caller's own registered devices
+// (a lost phone, a cleared browser profile) so messages stop being sealed for it.
+func (a *API) handleDeleteDeviceKey(w http.ResponseWriter, r *http.Request) {
+	me := auth.CurrentUser(r)
+	id := chi.URLParam(r, "id")
+	if id == db.BackupDeviceID {
+		writeErr(w, http.StatusBadRequest, "use the key backup settings to remove the backup")
+		return
+	}
+	if err := a.db.DeleteDeviceKey(me.ID, id); err != nil {
+		writeErr(w, http.StatusInternalServerError, "could not remove device")
+		return
+	}
+	a.audit(r, "device_remove", "user", &me.ID, id)
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
 
 type registerDeviceKeyRequest struct {
 	DeviceID     string `json:"device_id"`
@@ -27,6 +52,24 @@ func (a *API) handleRegisterDeviceKey(w http.ResponseWriter, r *http.Request) {
 	if req.DeviceID == "" || len(req.DeviceID) > 128 || req.PublicKeyJWK == "" || len(req.PublicKeyJWK) > 4096 {
 		writeErr(w, http.StatusBadRequest, "invalid device_id or public_key_jwk")
 		return
+	}
+	if req.DeviceID == db.BackupDeviceID {
+		writeErr(w, http.StatusBadRequest, "reserved device_id")
+		return
+	}
+	var jwk struct {
+		Kty string `json:"kty"`
+		Crv string `json:"crv"`
+		X   string `json:"x"`
+		Y   string `json:"y"`
+	}
+	if json.Unmarshal([]byte(req.PublicKeyJWK), &jwk) != nil || jwk.Kty != "EC" || jwk.Crv != "P-256" || jwk.X == "" || jwk.Y == "" {
+		writeErr(w, http.StatusBadRequest, "public_key_jwk must be a P-256 EC key")
+		return
+	}
+	if n, err := a.db.CountDeviceKeys(me.ID); err == nil && n >= maxDevicesPerUser && !a.db.HasDeviceKey(me.ID, req.DeviceID) {
+		// Make room by dropping the oldest device rather than locking the user out.
+		_ = a.db.DeleteOldestDeviceKey(me.ID)
 	}
 	if err := a.db.UpsertDeviceKey(me.ID, req.DeviceID, req.PublicKeyJWK); err != nil {
 		writeErr(w, http.StatusInternalServerError, "could not register device key")

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -136,15 +137,19 @@ func (a *API) handleUpload(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	ext := strings.ToLower(filepath.Ext(header.Filename))
-	if len(ext) > 10 {
-		ext = ""
-	}
-	if sv.BlockedFileExtensions[ext] {
-		writeErr(w, http.StatusUnsupportedMediaType, fmt.Sprintf("files of type %q are not allowed", ext))
+	// Windows ignores trailing dots and spaces ("a.ps1." saves as "a.ps1"),
+	// so normalise before judging the extension, and check every dotted
+	// segment so "a.exe.txt" style tricks and archive-style names are seen too.
+	cleanName := strings.TrimRight(filepath.Base(header.Filename), ". 	")
+	if bad := blockedSegment(cleanName, sv.BlockedFileExtensions); bad != "" {
+		writeErr(w, http.StatusUnsupportedMediaType, fmt.Sprintf("files of type %q are not allowed", bad))
 		return
 	}
-	name := filepath.Base(header.Filename)
+	ext := strings.ToLower(filepath.Ext(cleanName))
+	if len(ext) > 10 || strings.ContainsAny(ext, ":\\/ ") {
+		ext = ""
+	}
+	name := cleanName
 	if name == "" || name == "." || name == "/" {
 		name = "file" + ext
 	}
@@ -182,7 +187,7 @@ func (a *API) handleUpload(w http.ResponseWriter, r *http.Request) {
 	}
 	if sv.MaxUserStorageBytes > 0 {
 		used, err := a.db.SumFileBytesForUploader(me.ID)
-		if err == nil && used+written > sv.MaxUserStorageBytes {
+		if err != nil || used+written > sv.MaxUserStorageBytes {
 			os.Remove(storedPath)
 			writeErr(w, http.StatusInsufficientStorage, fmt.Sprintf("storage quota exceeded (max %d MB)", sv.MaxUserStorageBytes/(1<<20)))
 			return
@@ -202,6 +207,22 @@ func (a *API) handleUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, f.FileBrief)
+}
+
+// blockedSegment returns the first blocked extension found in any dotted
+// segment after the base name, or "".
+func blockedSegment(name string, blocked map[string]bool) string {
+	if len(blocked) == 0 {
+		return ""
+	}
+	parts := strings.Split(strings.ToLower(name), ".")
+	for _, seg := range parts[1:] {
+		seg = strings.TrimSpace(seg)
+		if blocked["."+seg] {
+			return "." + seg
+		}
+	}
+	return ""
 }
 
 func randomHex(n int) (string, error) {
@@ -248,7 +269,8 @@ func (a *API) handleDownload(w http.ResponseWriter, r *http.Request) {
 	// Use the bytes that are actually on disk; the database is metadata and
 	// may be stale if an operator replaced or recovered a file manually.
 	w.Header().Set("Content-Length", strconv.FormatInt(info.Size(), 10))
-	w.Header().Set("Content-Disposition", fmt.Sprintf(`%s; filename="%s"`, disposition, sanitizeHeaderName(f.Name)))
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`%s; filename="%s"; filename*=UTF-8''%s`, disposition, sanitizeHeaderName(f.Name), url.PathEscape(f.Name)))
+	w.Header().Set("Cache-Control", "private, no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Content-Security-Policy", "sandbox; default-src 'none'")
 	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(transferDeadline))
@@ -274,13 +296,13 @@ func (a *API) PurgeOldMessages() {
 	if days <= 0 || time.Since(lastRetentionRun) < 23*time.Hour {
 		return
 	}
-	lastRetentionRun = time.Now()
 	cutoff := time.Now().AddDate(0, 0, -days).UTC().Format(time.RFC3339)
 	n, err := a.db.PurgeMessagesBefore(cutoff)
 	if err != nil {
 		a.log.Warn("message retention purge", "err", err)
 		return
 	}
+	lastRetentionRun = time.Now()
 	if n > 0 {
 		a.log.Info("message retention: purged old messages", "count", n, "older_than_days", days)
 	}
