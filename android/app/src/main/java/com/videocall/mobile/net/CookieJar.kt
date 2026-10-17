@@ -65,12 +65,13 @@ class PersistentCookieJar(context: Context) : CookieJar {
     override fun loadForRequest(url: HttpUrl): List<Cookie> {
         val list = store[url.host] ?: return emptyList()
         val now = System.currentTimeMillis()
+        // A Secure cookie must never go out over plain HTTP.
         val valid = list.filter { it.expiresAt > now }
         if (valid.size != list.size) {
             store[url.host] = valid.toMutableList()
             persist(url.host)
         }
-        return valid
+        return valid.filter { !it.secure || url.isHttps }
     }
 
     @Synchronized
@@ -93,7 +94,7 @@ class PersistentCookieJar(context: Context) : CookieJar {
     @Synchronized
     fun importRawCookies(host: String, rawHeader: String) {
         val existing = store.getOrPut(host) { mutableListOf() }
-        val farFuture = System.currentTimeMillis() + 30L * 24 * 60 * 60 * 1000
+        val farFuture = System.currentTimeMillis() + 365L * 24 * 60 * 60 * 1000
         for (pair in rawHeader.split(";")) {
             val idx = pair.indexOf('=')
             if (idx <= 0) continue
