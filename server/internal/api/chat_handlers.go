@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -150,6 +151,9 @@ func (a *API) handleListGroups(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, groups)
 }
 
+// maxGroupBatch bounds member ids per create/add request (each is a lookup).
+const maxGroupBatch = 200
+
 type createGroupRequest struct {
 	Name      string  `json:"name"`
 	MemberIDs []int64 `json:"member_ids"`
@@ -167,6 +171,10 @@ func (a *API) handleCreateGroup(w http.ResponseWriter, r *http.Request) {
 	req.Name = strings.TrimSpace(req.Name)
 	if len(req.Name) < 1 || len(req.Name) > 64 {
 		writeErr(w, http.StatusBadRequest, "group name must be 1-64 characters")
+		return
+	}
+	if len(req.MemberIDs) > maxGroupBatch {
+		writeErr(w, http.StatusBadRequest, "too many members in one request")
 		return
 	}
 	for _, id := range req.MemberIDs {
@@ -269,6 +277,23 @@ func (a *API) handleRenameGroup(w http.ResponseWriter, r *http.Request) {
 		}
 		req.Topic = &topic
 	}
+	// Publishing a private group exposes its whole history to everyone, so
+	// only the owner (or a site admin) may change visibility.
+	if req.Public != nil && group.CreatedBy != me.ID && me.Role != "admin" {
+		writeErr(w, http.StatusForbidden, "only the group owner can change who can find this group")
+		return
+	}
+	// Validate every field before applying any, so a rejected request changes nothing.
+	if req.AvatarFileID != nil && *req.AvatarFileID != 0 {
+		// Must be the caller's own upload: a group icon is readable by every
+		// member (see CanAccessFile), so accepting any file id would let a
+		// group owner read anyone's private image by id.
+		file, err := a.db.GetFile(*req.AvatarFileID)
+		if err != nil || file.UploaderID != me.ID || !strings.HasPrefix(file.Mime, "image/") {
+			writeErr(w, http.StatusBadRequest, "group icon must be an image uploaded by you")
+			return
+		}
+	}
 	if req.Public != nil {
 		if err := a.db.SetGroupPublic(id, *req.Public); err != nil {
 			writeErr(w, http.StatusInternalServerError, "could not update group visibility")
@@ -282,24 +307,13 @@ func (a *API) handleRenameGroup(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if req.AvatarFileID != nil {
-		if *req.AvatarFileID == 0 {
-			if err := a.db.SetGroupAvatar(id, nil); err != nil {
-				writeErr(w, http.StatusInternalServerError, "could not clear group icon")
-				return
-			}
-		} else {
-			// Must be the caller's own upload: a group icon is readable by every
-			// member (see CanAccessFile), so accepting any file id would let a
-			// group owner read anyone's private image by id.
-			file, err := a.db.GetFile(*req.AvatarFileID)
-			if err != nil || file.UploaderID != me.ID || !strings.HasPrefix(file.Mime, "image/") {
-				writeErr(w, http.StatusBadRequest, "group icon must be an image uploaded by you")
-				return
-			}
-			if err := a.db.SetGroupAvatar(id, req.AvatarFileID); err != nil {
-				writeErr(w, http.StatusInternalServerError, "could not set group icon")
-				return
-			}
+		var avatar *int64
+		if *req.AvatarFileID != 0 {
+			avatar = req.AvatarFileID
+		}
+		if err := a.db.SetGroupAvatar(id, avatar); err != nil {
+			writeErr(w, http.StatusInternalServerError, "could not set group icon")
+			return
 		}
 	}
 	a.audit(r, "group_update", "group", &id, "")
@@ -347,6 +361,10 @@ func (a *API) handleSetGroupMemberRole(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := a.db.SetGroupMemberRole(id, targetID, req.Role); err != nil {
+		if err == db.ErrNotFound {
+			writeErr(w, http.StatusNotFound, "not a member of this group")
+			return
+		}
 		writeErr(w, http.StatusInternalServerError, "could not update role")
 		return
 	}
@@ -443,8 +461,23 @@ func (a *API) handleSearchMessages(w http.ResponseWriter, r *http.Request) {
 		}
 		f.SenderID = id
 	}
-	f.Since = q.Get("since")
-	f.Until = q.Get("until")
+	if !a.searchLimiter.Reserve(strconv.FormatInt(me.ID, 10)) {
+		writeErr(w, http.StatusTooManyRequests, "too many searches; wait a moment")
+		return
+	}
+	for _, p := range []struct {
+		name string
+		dst  *string
+	}{{"since", &f.Since}, {"until", &f.Until}} {
+		if v := q.Get(p.name); v != "" {
+			t, err := time.Parse(time.RFC3339, v)
+			if err != nil {
+				writeErr(w, http.StatusBadRequest, "invalid "+p.name+" (use RFC3339)")
+				return
+			}
+			*p.dst = t.UTC().Format(time.RFC3339)
+		}
+	}
 	f.HasFile = q.Get("has_file") == "true"
 	if f.Query == "" && f.SenderID == 0 && f.Since == "" && f.Until == "" && !f.HasFile {
 		writeErr(w, http.StatusBadRequest, "provide at least one of: q, sender_id, since, until, has_file")
@@ -501,6 +534,9 @@ func (a *API) handleListSavedMessages(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, msgs)
 }
 
+// exportLimit caps one export; an X-Export-Truncated header marks a cut-off one.
+const exportLimit = 10_000
+
 // handleExportMessages downloads the caller's full history with one peer or
 // group as a JSON attachment.
 func (a *API) handleExportMessages(w http.ResponseWriter, r *http.Request) {
@@ -513,7 +549,7 @@ func (a *API) handleExportMessages(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, http.StatusBadRequest, "invalid peer id")
 			return
 		}
-		all, err := a.db.ListDirectMessages(me.ID, peerID, 0, 10_000)
+		all, err := a.db.ListDirectMessages(me.ID, peerID, 0, exportLimit)
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, "export failed")
 			return
@@ -530,7 +566,7 @@ func (a *API) handleExportMessages(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, http.StatusForbidden, "not a member of this group")
 			return
 		}
-		all, err := a.db.ListGroupMessages(gid, 0, 10_000)
+		all, err := a.db.ListGroupMessages(gid, 0, exportLimit)
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, "export failed")
 			return
@@ -542,6 +578,10 @@ func (a *API) handleExportMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.enrichMessages(msgs)
+	if len(msgs) >= exportLimit {
+		// Say so instead of silently handing back a partial "full" history.
+		w.Header().Set("X-Export-Truncated", "true")
+	}
 	a.audit(r, "export", "messages", nil, filename)
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Content-Disposition", `attachment; filename="`+filename+`"`)
@@ -573,12 +613,19 @@ func (a *API) handleAddGroupMembers(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
+	if len(req.MemberIDs) > maxGroupBatch {
+		writeErr(w, http.StatusBadRequest, "too many members in one request")
+		return
+	}
 	for _, uid := range req.MemberIDs {
 		member, err := a.db.GetUserByID(uid)
 		if err != nil || member.Disabled {
 			writeErr(w, http.StatusBadRequest, "member is unavailable")
 			return
 		}
+	}
+	for _, uid := range req.MemberIDs {
+		_ = a.db.UnbanGroupMember(id, uid) // a manager re-adding someone lifts the ban
 	}
 	if err := a.db.AddGroupMembers(id, req.MemberIDs); err != nil {
 		writeErr(w, http.StatusInternalServerError, "could not add members")
@@ -634,9 +681,11 @@ func (a *API) handleRemoveGroupMember(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "could not remove member")
 		return
 	}
-	if !isSelf {
-		a.hub.EvictFromGroupRoom(id, targetID)
+	if !isSelf && a.db.IsGroupPublic(id) {
+		_ = a.db.BanGroupMember(id, targetID) // removed from a public channel: no instant rejoin
 	}
+	// Leaving or being removed both mean off the group's call too.
+	a.hub.EvictFromGroupRoom(id, targetID)
 	action := "group_remove_member"
 	if isSelf {
 		action = "group_leave"
@@ -753,6 +802,10 @@ func (a *API) handleJoinGroup(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	if err != nil || !a.db.IsGroupPublic(id) {
 		writeErr(w, http.StatusNotFound, "channel not found")
+		return
+	}
+	if a.db.IsGroupBanned(id, me.ID) {
+		writeErr(w, http.StatusForbidden, "you were removed from this channel")
 		return
 	}
 	if err := a.db.AddGroupMembers(id, []int64{me.ID}); err != nil {

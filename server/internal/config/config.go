@@ -313,6 +313,10 @@ func (c *Config) Validate(log *slog.Logger) {
 		log.Info("HTTPS_REDIRECT has no effect here — TLS isn't terminated by this process in this mode")
 	}
 
+	if len(c.JWTSecret) < 32 {
+		log.Warn("JWT_SECRET is shorter than 32 bytes; use a long random value (or unset it to have one generated)")
+	}
+
 	if c.SessionTTLHours < 1 {
 		log.Warn("SESSION_TTL_HOURS too low; resetting to 1", "was", c.SessionTTLHours)
 		c.SessionTTLHours = 1
@@ -414,4 +418,23 @@ func DetectPrimaryLANIP() string {
 		}
 	}
 	return fallback
+}
+
+// TrustCertPath is the certificate a device should install to trust this
+// server: the generated CA when the server created its own certificate, else
+// the configured TLS certificate.
+func TrustCertPath(c *Config) string {
+	generated := filepath.Join(c.DataDir, "cert.pem")
+	if c.TLSCert == "" || c.TLSCert == generated {
+		if ca := filepath.Join(c.DataDir, "ca.pem"); fileExists(ca) {
+			return ca
+		}
+		return generated
+	}
+	return c.TLSCert
+}
+
+func fileExists(p string) bool {
+	_, err := os.Stat(p)
+	return err == nil
 }

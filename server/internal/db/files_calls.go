@@ -309,7 +309,7 @@ func (d *DB) MarkParticipantMissed(callID, userID int64) error {
 func (d *DB) ListCallsForUser(userID int64, limit int) ([]*Call, error) {
 	rows, err := d.Query(`
 		SELECT c.id FROM calls c
-		JOIN call_participants cp ON cp.call_id = c.id
+		LEFT JOIN call_participants cp ON cp.call_id = c.id
 		WHERE cp.user_id = ? OR c.initiator_id = ?
 		GROUP BY c.id ORDER BY c.id DESC LIMIT ?`, userID, userID, limit)
 	if err != nil {

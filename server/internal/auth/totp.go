@@ -48,16 +48,23 @@ func totpCode(secret string, counter uint64) (string, bool) {
 // VerifyTOTP checks a 6-digit code against the current 30s step, allowing one
 // step of clock drift either way (RFC 6238).
 func VerifyTOTP(secret, code string, now time.Time) bool {
+	_, ok := VerifyTOTPStep(secret, code, now)
+	return ok
+}
+
+// VerifyTOTPStep is VerifyTOTP that also reports which 30-second step matched,
+// so callers can refuse to accept the same step twice (replay).
+func VerifyTOTPStep(secret, code string, now time.Time) (int64, bool) {
 	code = strings.ReplaceAll(strings.TrimSpace(code), " ", "")
 	if len(code) != 6 {
-		return false
+		return 0, false
 	}
-	step := uint64(now.Unix() / 30)
-	for d := -1; d <= 1; d++ {
-		want, ok := totpCode(secret, uint64(int64(step)+int64(d)))
+	step := now.Unix() / 30
+	for d := int64(-1); d <= 1; d++ {
+		want, ok := totpCode(secret, uint64(step+d))
 		if ok && subtle.ConstantTimeCompare([]byte(want), []byte(code)) == 1 {
-			return true
+			return step + d, true
 		}
 	}
-	return false
+	return 0, false
 }

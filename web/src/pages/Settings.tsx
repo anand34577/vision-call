@@ -217,7 +217,15 @@ export default function Settings() {
     e.preventDefault();
     setProfileError(null);
     try {
-      const updated = await api.updateSelf({ display_name: displayName, email });
+      const emailChanged = email.trim().toLowerCase() !== (me.email ?? "").toLowerCase();
+      let current_password: string | undefined;
+      if (emailChanged) {
+        // The email is the password-recovery channel, so changing it needs the password.
+        const pw = window.prompt("Enter your current password to change your email");
+        if (pw === null) return;
+        current_password = pw;
+      }
+      const updated = await api.updateSelf({ display_name: displayName, email, current_password });
       if (updated && "id" in updated) setMe(updated as typeof me);
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);

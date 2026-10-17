@@ -122,6 +122,10 @@ func (a *API) handleOIDCCallback(w http.ResponseWriter, r *http.Request) {
 	}
 	q := r.URL.Query()
 	if errCode := q.Get("error"); errCode != "" {
+		// Only a known short code is passed on; the raw value is attacker-controlled.
+		if errCode != "access_denied" {
+			errCode = "provider_error"
+		}
 		oidcRedirectResult(w, r, "", "sso-error="+errCode)
 		return
 	}
@@ -211,7 +215,12 @@ func (a *API) finishOIDCLogin(w http.ResponseWriter, r *http.Request, result *oi
 // local password (see AnonymizeUser's sibling constant) — it only ever logs
 // in via SSO unless an admin sets a password for it.
 func (a *API) autoProvisionOIDCUser(r *http.Request, id oidc.Identity) (*db.User, error) {
-	username := usernameFromEmail(id.Email)
+	// Only a verified address may influence the username; an unverified one is
+	// attacker-chosen at the IdP.
+	username := ""
+	if id.EmailVerified {
+		username = usernameFromEmail(id.Email)
+	}
 	if username == "" {
 		username = "user"
 	}
@@ -237,12 +246,14 @@ func (a *API) autoProvisionOIDCUser(r *http.Request, id oidc.Identity) (*db.User
 	if err != nil {
 		return nil, err
 	}
-	if id.Email != "" {
+	if err := a.db.LinkOIDC(user.ID, id.Issuer, id.Subject); err != nil {
+		// Don't leave an unlinked, unusable account behind.
+		_ = a.db.PurgeUser(user.ID)
+		return nil, err
+	}
+	if id.Email != "" && id.EmailVerified {
 		email := strings.ToLower(strings.TrimSpace(id.Email))
 		_ = a.db.SetUserEmail(user.ID, &email) // best-effort; a collision just leaves email unset
-	}
-	if err := a.db.LinkOIDC(user.ID, id.Issuer, id.Subject); err != nil {
-		return nil, err
 	}
 	if err := a.db.WriteAudit(nil, username, "user_create", "user", &user.ID, "via OIDC auto-provision", RealIP(r, a.settings.Get().TrustProxy)); err != nil && a.log != nil {
 		a.log.Warn("write audit entry", "action", "user_create", "err", err)
@@ -283,6 +294,11 @@ const autoProvisionedPasswordHash = `$argon2id$v=19$m=0,t=0,p=0$-$-`
 
 func (a *API) handleOIDCUnlink(w http.ResponseWriter, r *http.Request) {
 	me := auth.CurrentUser(r)
+	// An SSO-only account has no password; unlinking would lock it out.
+	if strings.Contains(me.PasswordHash, "m=0,t=0") {
+		writeErr(w, http.StatusBadRequest, "set a password before unlinking SSO")
+		return
+	}
 	if err := a.db.UnlinkOIDC(me.ID); err != nil {
 		writeErr(w, http.StatusInternalServerError, "could not unlink SSO")
 		return

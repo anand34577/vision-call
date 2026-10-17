@@ -20,10 +20,10 @@ typealias WsHandler = (JsonElement) -> Unit
  * typed handler registration by message "type".
  */
 class WsClient(private val api: Api, private val deviceId: String) {
-    private var ws: WebSocket? = null
+    @Volatile private var ws: WebSocket? = null
     private val handlers = mutableMapOf<String, CopyOnWriteArrayList<WsHandler>>()
-    private var backoffMs = 1000L
-    private var wantConnected = false
+    @Volatile private var backoffMs = 1000L
+    @Volatile private var wantConnected = false
     private val main = Handler(Looper.getMainLooper())
     private var reconnectRunnable: Runnable? = null
     var replaced = false
@@ -42,6 +42,7 @@ class WsClient(private val api: Api, private val deviceId: String) {
 
     val connected: Boolean get() = ws != null
 
+    @Synchronized
     fun connect() {
         if (ws != null) return
         wantConnected = true
@@ -50,7 +51,11 @@ class WsClient(private val api: Api, private val deviceId: String) {
         val url = api.baseUrl.replaceFirst(Regex("^https?"), wsScheme) + "/ws?device=$deviceId"
         val req = Request.Builder().url(url).build()
         val socket = api.client.newWebSocket(req, object : WebSocketListener() {
+            // Callbacks of a socket that was already replaced or cancelled must
+            // not tear down the current one.
+            private fun stale(webSocket: WebSocket) = ws !== null && ws !== webSocket
             override fun onOpen(webSocket: WebSocket, response: Response) {
+                if (stale(webSocket)) { webSocket.cancel(); return }
                 backoffMs = 1000
                 onReconnecting?.invoke(false)
                 emit("ws:open", JsonNull)
@@ -69,10 +74,12 @@ class WsClient(private val api: Api, private val deviceId: String) {
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                if (stale(webSocket)) return
                 onGone()
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                if (stale(webSocket)) return
                 if (response?.code == 401) {
                     wantConnected = false
                     onGone()
@@ -85,6 +92,7 @@ class WsClient(private val api: Api, private val deviceId: String) {
         ws = socket
     }
 
+    @Synchronized
     private fun onGone() {
         ws = null
         emit("ws:close", JsonNull)
@@ -95,6 +103,7 @@ class WsClient(private val api: Api, private val deviceId: String) {
         if (wantConnected) scheduleReconnect()
     }
 
+    @Synchronized
     private fun scheduleReconnect() {
         if (reconnectRunnable != null) return
         onReconnecting?.invoke(true)

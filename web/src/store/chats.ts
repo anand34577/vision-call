@@ -612,26 +612,20 @@ export const useChats = create<ChatsState>((set, get) => ({
         // Someone in the chat has never signed in on any device, so there's
         // no key to encrypt for. With encryption on only by default, send it
         // unencrypted and say so; if the user turned it on themselves, don't.
-        if (missing.length > 0 && !hasExplicitE2EFlag(key(c))) {
-          toast.info(
-            missing.length === 1
-              ? "Sent without end-to-end encryption: the other person hasn't signed in on any device yet."
-              : `Sent without end-to-end encryption: ${missing.length} people haven't signed in on any device yet.`,
-          );
-          if (!ws.send("message:send", { ...basePayload, content: text })) fail();
-          return;
-        }
+        // Never fall back to plaintext on the sender's behalf: a server that
+        // hides a user's keys could otherwise force every message into the clear.
         if (missing.length > 0) {
-          set({ sendError: `Could not send: ${missing.length === 1 ? "a recipient hasn't" : `${missing.length} recipients haven't`} set up encryption on any device yet.` });
+          set({ sendError: `Could not send encrypted: ${missing.length === 1 ? "a recipient hasn't" : `${missing.length} recipients haven't`} signed in on any device yet. Turn encryption off for this chat to send anyway.` });
           fail();
           return;
         }
-        encryptForRecipients(text, recipientIDs)
+        const convo = c.kind === "dm" ? `dm:${Math.min(me.id, c.peerID)}-${Math.max(me.id, c.peerID)}` : `g:${c.groupID}`;
+        encryptForRecipients(text, recipientIDs, { senderID: me.id, convo })
           .then(({ ciphertext, iv, encKeys }) => {
             if (!ws.send("message:send", { ...basePayload, content: ciphertext, encrypted: true, enc_iv: iv, enc_keys: encKeys })) fail();
           })
-          .catch(() => {
-            set({ sendError: "Could not encrypt message — the recipient may not have encryption set up yet." });
+          .catch((err) => {
+            set({ sendError: err instanceof Error && err.message ? err.message : "Could not encrypt message — the recipient may not have encryption set up yet." });
             fail();
           });
       }).catch(() => {

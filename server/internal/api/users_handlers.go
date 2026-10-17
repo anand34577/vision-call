@@ -80,7 +80,11 @@ func (a *API) handleListUsers(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			if u.ID != me.ID {
+				// Other people's security posture is not for the directory.
 				u.Email = nil
+				u.TOTPSecret = ""
+				u.OIDCSubject = nil
+				u.MustChangePassword = false
 			}
 			visible = append(visible, u)
 		}
@@ -262,12 +266,30 @@ func (a *API) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 	// use), bail before touching password/role/disabled below, so a failed
 	// request never leaves a half-applied update (password changed but the
 	// session-revoke step never reached).
-	if req.Email != nil && !a.setEmail(w, id, *req.Email) {
-		return
+	var newEmail *string
+	if req.Email != nil {
+		e, err := normalizeEmail(*req.Email)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		newEmail = e
+		if e != nil {
+			if other, err := a.db.GetUserByEmailAny(*e); err == nil && other.ID != id {
+				writeErr(w, http.StatusConflict, "email already in use")
+				return
+			}
+		}
 	}
 	if err := a.db.UpdateUserWithPassword(id, req.DisplayName, req.Role, req.Disabled, passwordHash); err != nil {
 		writeErr(w, http.StatusInternalServerError, "could not update user")
 		return
+	}
+	if req.Email != nil {
+		if err := a.db.SetUserEmail(id, newEmail); err != nil {
+			writeErr(w, http.StatusInternalServerError, "could not update email")
+			return
+		}
 	}
 
 	// Suspending or changing the password takes effect straight away: every
@@ -509,8 +531,29 @@ func (a *API) handleUpdateSelf(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if req.Email != nil && !a.setEmail(w, me.ID, *req.Email) {
-		return
+	if req.Email != nil {
+		// The email is the recovery channel: changing it needs the password, so
+		// a stolen session can't redirect "forgot password" to the attacker.
+		if cur := ""; me.Email != nil {
+			cur = *me.Email
+			if !strings.EqualFold(strings.TrimSpace(*req.Email), cur) {
+				if ok, err := auth.VerifyPassword(me.PasswordHash, req.CurrentPassword); err != nil || !ok {
+					writeErr(w, http.StatusBadRequest, "enter your current password to change your email")
+					return
+				}
+			}
+		} else if strings.TrimSpace(*req.Email) != "" {
+			if ok, err := auth.VerifyPassword(me.PasswordHash, req.CurrentPassword); err != nil || !ok {
+				// SSO-only accounts have no password to prove; allow the first email there.
+				if !strings.Contains(me.PasswordHash, "m=0,t=0") {
+					writeErr(w, http.StatusBadRequest, "enter your current password to set your email")
+					return
+				}
+			}
+		}
+		if !a.setEmail(w, me.ID, *req.Email) {
+			return
+		}
 	}
 	user, err := a.db.GetUserByID(me.ID)
 	if err != nil {

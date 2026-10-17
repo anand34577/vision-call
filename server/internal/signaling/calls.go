@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"strings"
 	"sync"
 	"time"
 
@@ -42,6 +43,18 @@ type p2pCall struct {
 
 func newP2PManager(h *Hub) *p2pManager {
 	return &p2pManager{hub: h, calls: map[string]*p2pCall{}, byUser: map[int64]string{}, grace: map[int64]*time.Timer{}}
+}
+
+func validCallID(id string) bool {
+	if id == "" || len(id) > 64 || !strings.HasPrefix(id, "p2p-") {
+		return false
+	}
+	for _, r := range id {
+		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_') {
+			return false
+		}
+	}
+	return true
 }
 
 func newCallID() string {
@@ -91,7 +104,9 @@ func (c *Client) handleCallInvite(env *Envelope) {
 		c.Send("call:ended", map[string]any{"call_id": p.CallID, "reason": "unavailable"})
 		return
 	}
-	if p.CallID == "" {
+	// The id is used as a map key and stored in the DB: accept only a short,
+	// plain token that can't impersonate a room id, else make our own.
+	if !validCallID(p.CallID) {
 		p.CallID = newCallID()
 	}
 	c.hub.callStateMu.Lock()

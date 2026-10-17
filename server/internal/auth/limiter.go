@@ -40,6 +40,12 @@ func NewIPLoginLimiter() *LoginLimiter {
 	return newLoginLimiter(30, 15*time.Minute)
 }
 
+// NewRateLimiter is a general fixed-window limiter: at most max Reserve calls
+// per key per window.
+func NewRateLimiter(max int, window time.Duration) *LoginLimiter {
+	return newLoginLimiter(max, window)
+}
+
 func newLoginLimiter(max int, window time.Duration) *LoginLimiter {
 	l := &LoginLimiter{
 		attempts: map[string]*attempt{},
@@ -91,6 +97,12 @@ func (l *LoginLimiter) Reserve(key string) bool {
 	defer l.mu.Unlock()
 	a, ok := l.attempts[key]
 	if !ok || time.Now().After(a.until) {
+		if !ok && len(l.attempts) >= maxLimiterEntries {
+			l.evictExpiredLocked()
+			if len(l.attempts) >= maxLimiterEntries {
+				return false // fail closed rather than grow without bound
+			}
+		}
 		a = &attempt{until: time.Now().Add(l.window)}
 		l.attempts[key] = a
 	}
@@ -99,6 +111,19 @@ func (l *LoginLimiter) Reserve(key string) bool {
 	}
 	a.count++
 	return true
+}
+
+// maxLimiterEntries bounds the limiter map so unauthenticated callers can't
+// grow it without limit by varying the key.
+const maxLimiterEntries = 100_000
+
+func (l *LoginLimiter) evictExpiredLocked() {
+	now := time.Now()
+	for k, a := range l.attempts {
+		if now.After(a.until) {
+			delete(l.attempts, k)
+		}
+	}
 }
 
 // Allowed reports whether key is currently under the cap, without counting

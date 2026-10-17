@@ -21,6 +21,12 @@ func (a *API) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.Username = strings.TrimSpace(strings.ToLower(req.Username))
+	// Bound attacker-controlled strings before they reach the limiter maps or
+	// the audit log.
+	if len(req.Username) > 64 || len(req.Password) > 1024 || len(req.TOTPCode) > 16 {
+		writeErr(w, http.StatusUnauthorized, "invalid username or password")
+		return
+	}
 	if req.Username == "" || req.Password == "" {
 		writeErr(w, http.StatusUnauthorized, "invalid username or password")
 		return
@@ -34,7 +40,7 @@ func (a *API) handleLogin(w http.ResponseWriter, r *http.Request) {
 	// Reserve counts the attempt immediately, before the slow password
 	// verification below, so a burst of concurrent requests can't all pass
 	// the check before any of them gets counted.
-	if !a.limiter.Reserve(key) || !a.ipLimiter.Reserve(ip) {
+	if !a.ipLimiter.Reserve(ip) || !a.limiter.Reserve(key) {
 		writeErr(w, http.StatusTooManyRequests, "too many failed attempts; try again in a few minutes")
 		return
 	}
@@ -66,7 +72,8 @@ func (a *API) handleLogin(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, http.StatusUnauthorized, "two-factor code required")
 			return
 		}
-		if !auth.VerifyTOTP(user.TOTPSecret, req.TOTPCode, time.Now()) {
+		step, ok := auth.VerifyTOTPStep(user.TOTPSecret, req.TOTPCode, time.Now())
+		if !ok || !a.acceptTOTPStep(user.ID, step) {
 			a.auditAnon(r, req.Username, "login_failed", "bad two-factor code")
 			writeErr(w, http.StatusUnauthorized, "invalid two-factor code")
 			return
@@ -97,6 +104,8 @@ func (a *API) handleLogout(w http.ResponseWriter, r *http.Request) {
 	if cookie, err := r.Cookie(auth.CookieName); err == nil {
 		if claims, err := auth.ParseToken(a.cfg.JWTSecret, cookie.Value); err == nil {
 			a.db.DeleteSession(claims.SessionID)
+			// Close live sockets of this session too, not just the REST side.
+			a.hub.KickSession(auth.CurrentUser(r).ID, claims.SessionID, "signed_out")
 		}
 	}
 	http.SetCookie(w, &http.Cookie{
@@ -119,4 +128,16 @@ func (a *API) handleMe(w http.ResponseWriter, r *http.Request) {
 		user.Preferences = prefs
 	}
 	writeJSON(w, http.StatusOK, user)
+}
+
+// acceptTOTPStep records a used TOTP step and refuses one that was already
+// accepted (or is older), so an observed code can't be replayed.
+func (a *API) acceptTOTPStep(userID, step int64) bool {
+	a.totpMu.Lock()
+	defer a.totpMu.Unlock()
+	if last, ok := a.totpLast[userID]; ok && step <= last {
+		return false
+	}
+	a.totpLast[userID] = step
+	return true
 }

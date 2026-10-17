@@ -233,7 +233,7 @@ func (c *Client) handleMessageSend(env *Envelope) {
 			c.sendMessageError(p.ClientID, "message too long (8000 chars max)")
 			return
 		}
-	} else if len(p.Content) > 32000 || len(p.EncKeys) > 65536 {
+	} else if len(p.Content) > 32000 || len(p.EncKeys) > 262144 {
 		// Ciphertext/wrapped-key blobs run larger than plaintext (base64
 		// inflation, one wrapped key per recipient device) — generous caps
 		// just to bound abuse, not to match the plaintext limit.
@@ -447,7 +447,7 @@ func (c *Client) handleMessageReact(env *Envelope) {
 	if err != nil {
 		return
 	}
-	if !c.canSeeMessage(msg) {
+	if msg.DeletedAt != nil || !c.canSeeMessage(msg) {
 		return
 	}
 	added, err := c.hub.db.ToggleReaction(p.ID, c.user.ID, p.Emoji)
@@ -508,17 +508,15 @@ func (c *Client) canPin(msg *dbMessage) bool {
 // canSeeMessage reports whether c.user is a legitimate party to msg's
 // conversation (DM sender/recipient, or a member of its group).
 func (c *Client) canSeeMessage(msg *dbMessage) bool {
-	if msg.SenderID == c.user.ID {
-		return true
-	}
-	if msg.RecipientID != nil {
-		return *msg.RecipientID == c.user.ID
-	}
+	// Group messages: current members only, even for the original sender.
 	if msg.GroupID != nil {
 		member, err := c.hub.db.IsGroupMember(*msg.GroupID, c.user.ID)
 		return err == nil && member
 	}
-	return false
+	if msg.SenderID == c.user.ID {
+		return true
+	}
+	return msg.RecipientID != nil && *msg.RecipientID == c.user.ID
 }
 
 // broadcastToConversationRaw sends payload to everyone who could see msg
@@ -565,7 +563,7 @@ func (c *Client) handleTyping(env *Envelope) {
 	if p.RecipientID != nil {
 		// No DB lookup per keystroke: a disabled user has no live socket
 		// (they're kicked when disabled), so sendToUser is already a no-op.
-		if *p.RecipientID != c.user.ID {
+		if *p.RecipientID != c.user.ID && !c.hub.db.IsBlockedEitherWay(c.user.ID, *p.RecipientID) {
 			c.hub.sendToUser(*p.RecipientID, "message:typing", payload)
 		}
 		return
@@ -605,6 +603,9 @@ func (c *Client) handleRead(env *Envelope) {
 		return
 	}
 	if p.PeerID != nil {
+		if c.hub.db.IsBlockedEitherWay(c.user.ID, *p.PeerID) {
+			return
+		}
 		now := time.Now().UTC().Format(time.RFC3339)
 		if _, err := c.hub.db.MarkDirectRead(*p.PeerID, c.user.ID, now); err != nil {
 			c.log.Error("message: mark read", "peer_id", *p.PeerID, "err", err)

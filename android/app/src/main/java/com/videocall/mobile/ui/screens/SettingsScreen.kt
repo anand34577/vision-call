@@ -317,6 +317,8 @@ private fun EditProfileSheet(onDismiss: () -> Unit) {
     val scope = rememberCoroutineScope()
     var displayName by remember { mutableStateOf(me?.display_name ?: "") }
     var email by remember { mutableStateOf(me?.email ?: "") }
+    var currentPassword by remember { mutableStateOf("") }
+    val emailChanged = email.trim().lowercase() != (me?.email ?: "").lowercase()
     var error by remember { mutableStateOf<String?>(null) }
     var saving by remember { mutableStateOf(false) }
 
@@ -330,12 +332,21 @@ private fun EditProfileSheet(onDismiss: () -> Unit) {
                 email, { email = it }, label = { Text("Email") }, singleLine = true, modifier = Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.medium,
                 supportingText = { Text("Used for password reset links") },
             )
+            if (emailChanged) {
+                Spacer(Modifier.height(10.dp))
+                OutlinedTextField(
+                    currentPassword, { currentPassword = it }, label = { Text("Current password") }, singleLine = true,
+                    visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                    modifier = Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.medium,
+                    supportingText = { Text("Required to change your email") },
+                )
+            }
             error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(vertical = 6.dp)) }
             Spacer(Modifier.height(12.dp))
             PrimaryButton("Save", enabled = displayName.isNotBlank(), busy = saving, onClick = {
                 saving = true
                 scope.launch {
-                    runCatching { SessionManager.api.updateSelf(displayName = displayName.trim(), email = email.trim()) }
+                    runCatching { SessionManager.api.updateSelf(displayName = displayName.trim(), email = email.trim(), currentPassword = if (emailChanged) currentPassword else null) }
                         .onSuccess { if (it.id != 0L) SessionManager.setMe(it); onDismiss() }
                         .onFailure { error = it.message ?: "Couldn't save" }
                     saving = false

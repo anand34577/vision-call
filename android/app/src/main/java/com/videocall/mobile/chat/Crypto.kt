@@ -55,6 +55,8 @@ object Crypto {
 
     @kotlinx.serialization.Serializable
     private data class WrappedKeyEntry(
+        /** 2 = ciphertext and key wraps are bound to sender + conversation (AAD). */
+        val v: Int = 0,
         val user_id: Long,
         val device_id: String,
         val wrapped_key: String,
@@ -191,16 +193,62 @@ object Crypto {
 
     data class EncryptedPayload(val ciphertext: String, val iv: String, val encKeys: String)
 
-    suspend fun encryptForRecipients(context: Context, plaintext: String, recipientUserIds: List<Long>): EncryptedPayload {
+    /** "dm:<low>-<high>" or "g:<groupId>": where a message lives, bound into the encryption. */
+    fun convoOf(senderId: Long, recipientId: Long?, groupId: Long?): String? = when {
+        groupId != null -> "g:$groupId"
+        recipientId != null -> "dm:${minOf(senderId, recipientId)}-${maxOf(senderId, recipientId)}"
+        else -> null
+    }
+
+    private fun aadBytes(senderId: Long, convo: String) = "vc2|$senderId|$convo".toByteArray(Charsets.UTF_8)
+
+    // ---- key pinning (trust on first use): same idea as the web client ----
+    private const val PINS = "key_pins_v1"
+    private fun fp(jwk: JsonObject) = "${(jwk["x"] as? JsonPrimitive)?.content}.${(jwk["y"] as? JsonPrimitive)?.content}"
+
+    /** Returns user ids whose key for an already-known device changed; pins are updated so a retry goes through. */
+    private fun checkPins(context: Context, keys: List<DeviceKey>): List<Long> {
+        val p = prefs(context)
+        val pins = runCatching { json.parseToJsonElement(p.getString(PINS, "{}") ?: "{}") as JsonObject }.getOrDefault(JsonObject(emptyMap())).toMutableMap()
+        val changed = mutableSetOf<Long>()
+        for (k in keys) {
+            val jwk = runCatching { json.parseToJsonElement(k.public_key_jwk) as JsonObject }.getOrNull() ?: continue
+            val id = "${k.user_id}:${k.device_id}"
+            val now = fp(jwk)
+            val old = (pins[id] as? JsonPrimitive)?.content
+            if (old != null && old != now) changed += k.user_id
+            pins[id] = JsonPrimitive(now)
+        }
+        p.edit().putString(PINS, JsonObject(pins).toString()).apply()
+        return changed.toList()
+    }
+
+    private var senderKeyCache: Pair<Long, MutableMap<Long, List<String>>> = 0L to mutableMapOf()
+    private suspend fun senderKeyKnown(senderId: Long, jwk: JsonObject): Boolean {
+        if (System.currentTimeMillis() - senderKeyCache.first > 30_000) senderKeyCache = System.currentTimeMillis() to mutableMapOf()
+        val list = senderKeyCache.second.getOrPut(senderId) {
+            runCatching { SessionManager.api.deviceKeys(listOf(senderId)) }.getOrDefault(emptyList()).map {
+                runCatching { fp(json.parseToJsonElement(it.public_key_jwk) as JsonObject) }.getOrDefault("")
+            }
+        }
+        return list.contains(fp(jwk))
+    }
+
+    suspend fun encryptForRecipients(context: Context, plaintext: String, recipientUserIds: List<Long>, senderId: Long, convo: String): EncryptedPayload {
         val bundle = getOrCreateKeyPair(context)
         val allKeys = SessionManager.api.deviceKeys(recipientUserIds)
         if (allKeys.isEmpty()) throw IllegalStateException("No recipient has encryption set up on any device yet")
+        if (checkPins(context, allKeys).isNotEmpty()) {
+            throw IllegalStateException("A recipient's encryption key changed since you last wrote to them. Check with them if unexpected, then send again.")
+        }
+        val aad = aadBytes(senderId, convo)
 
         val contentKeyBytes = ByteArray(32).also { java.security.SecureRandom().nextBytes(it) }
         val contentKey = SecretKeySpec(contentKeyBytes, "AES")
         val iv = ByteArray(12).also { java.security.SecureRandom().nextBytes(it) }
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         cipher.init(Cipher.ENCRYPT_MODE, contentKey, GCMParameterSpec(128, iv))
+        cipher.updateAAD(aad)
         val ciphertext = cipher.doFinal(plaintext.toByteArray(Charsets.UTF_8))
 
         val entries = mutableListOf<WrappedKeyEntry>()
@@ -212,9 +260,10 @@ object Crypto {
                 val wrapIv = ByteArray(12).also { java.security.SecureRandom().nextBytes(it) }
                 val wrapCipher = Cipher.getInstance("AES/GCM/NoPadding")
                 wrapCipher.init(Cipher.ENCRYPT_MODE, wrapKey, GCMParameterSpec(128, wrapIv))
+                wrapCipher.updateAAD(aad)
                 val wrapped = wrapCipher.doFinal(contentKeyBytes)
                 entries += WrappedKeyEntry(
-                    user_id = dk.user_id, device_id = dk.device_id,
+                    v = 2, user_id = dk.user_id, device_id = dk.device_id,
                     wrapped_key = b64std(wrapped), wrap_iv = b64std(wrapIv),
                     sender_pub_jwk = bundle.publicJwk,
                 )
@@ -241,18 +290,21 @@ object Crypto {
         cachedFor = null
     }
 
-    suspend fun decryptMessageContent(context: Context, id: Long, isEncrypted: Boolean, content: String, encIv: String?, encKeys: String?): String? {
+    suspend fun decryptMessageContent(
+        context: Context, id: Long, isEncrypted: Boolean, content: String, encIv: String?, encKeys: String?,
+        senderId: Long? = null, recipientId: Long? = null, groupId: Long? = null,
+    ): String? {
         if (!isEncrypted) return content
         decryptCache[id]?.let { return it }
         if (!decryptCache.containsKey(id)) {
-            val result = runCatching { decryptNow(context, content, encIv, encKeys) }.getOrNull()
+            val result = runCatching { decryptNow(context, content, encIv, encKeys, senderId, recipientId, groupId) }.getOrNull()
             decryptCache[id] = result
             return result
         }
         return null
     }
 
-    private suspend fun decryptNow(context: Context, content: String, encIv: String?, encKeysJson: String?): String? {
+    private suspend fun decryptNow(context: Context, content: String, encIv: String?, encKeysJson: String?, senderId: Long?, recipientId: Long?, groupId: Long?): String? {
         if (encIv == null || encKeysJson == null) return null
         val entries = runCatching { json.decodeFromString<List<WrappedKeyEntry>>(encKeysJson) }.getOrNull() ?: return null
         val myDeviceId = Prefs.deviceId(context)
@@ -268,14 +320,24 @@ object Crypto {
             mine = entries.firstOrNull { it.device_id == BACKUP_DEVICE && it.user_id == currentUserId() } ?: return null
             myPriv = backupPrivateKey(context) ?: return null
         }
+        var aad: ByteArray? = null
+        if (mine.v == 2) {
+            // v2 must say who sent it and where, and the sender's key must be one they registered.
+            if (senderId == null) return null
+            val convo = convoOf(senderId, recipientId, groupId) ?: return null
+            if (!senderKeyKnown(senderId, mine.sender_pub_jwk)) return null
+            aad = aadBytes(senderId, convo)
+        }
         val senderPub = publicKeyFromJwk(mine.sender_pub_jwk)
         val wrapKey = deriveWrapKey(myPriv, senderPub)
         val unwrapCipher = Cipher.getInstance("AES/GCM/NoPadding")
         unwrapCipher.init(Cipher.DECRYPT_MODE, wrapKey, GCMParameterSpec(128, b64stdDecode(mine.wrap_iv)))
+        aad?.let { unwrapCipher.updateAAD(it) }
         val rawContentKey = unwrapCipher.doFinal(b64stdDecode(mine.wrapped_key))
         val contentKey = SecretKeySpec(rawContentKey, "AES")
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         cipher.init(Cipher.DECRYPT_MODE, contentKey, GCMParameterSpec(128, b64stdDecode(encIv)))
+        aad?.let { cipher.updateAAD(it) }
         val plain = cipher.doFinal(b64stdDecode(content))
         return String(plain, Charsets.UTF_8)
     }
@@ -290,7 +352,7 @@ object Crypto {
     // on the server encrypted with a password (PBKDF2-SHA256 + AES-GCM).
 
     private const val BACKUP_DEVICE = "backup"
-    private const val PBKDF2_ITERATIONS = 310_000
+    private const val PBKDF2_ITERATIONS = 600_000
     private fun backupPrivPref(userId: Long) = "backup_priv:$userId"
 
     private fun backupPrivateKey(context: Context): PrivateKey? {
@@ -349,7 +411,9 @@ object Crypto {
     suspend fun restoreKeyBackup(context: Context, password: String) = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
         val data = SessionManager.api.keyBackup().data ?: throw IllegalStateException("There is no backup for this account")
         fun field(name: String) = (data[name] as? JsonPrimitive)?.content ?: throw IllegalStateException("The backup is damaged")
-        val iterations = field("iterations").toInt()
+        // Never trust KDF cost from the server: too low weakens, too high hangs the app.
+        val iterations = field("iterations").toIntOrNull()?.takeIf { it in 100_000..10_000_000 }
+            ?: throw IllegalStateException("The backup uses unsupported key-derivation settings")
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         cipher.init(Cipher.DECRYPT_MODE, passwordKey(password, b64stdDecode(field("salt")), iterations), GCMParameterSpec(128, b64stdDecode(field("iv"))))
         val pkcs8 = try {

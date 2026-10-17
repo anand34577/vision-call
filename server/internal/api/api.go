@@ -46,6 +46,12 @@ type API struct {
 	oidc      *oidc.Manager      // nil when SSO isn't configured
 	settings  *settings.Store
 	adminMu   sync.Mutex
+	restoreMu sync.Mutex
+	// searchLimiter keeps message search (a full scan) from being hammered.
+	searchLimiter *auth.LoginLimiter
+	totpMu        sync.Mutex
+	totpPending   map[int64]pendingTOTP // secret issued by setup, awaiting enable
+	totpLast      map[int64]int64       // last accepted TOTP step per user (replay guard)
 	startedAt time.Time
 	log       *slog.Logger
 	restart   func() // set by main; nil when the server can't restart itself
@@ -58,6 +64,9 @@ func New(cfg *config.Config, dbh *db.DB, hub PresenceProvider, oidcMgr *oidc.Man
 		hub:       hub,
 		limiter:   auth.NewLoginLimiter(),
 		ipLimiter: auth.NewIPLoginLimiter(),
+		searchLimiter: auth.NewRateLimiter(30, time.Minute),
+		totpPending:   map[int64]pendingTOTP{},
+		totpLast:      map[int64]int64{},
 		oidc:      oidcMgr,
 		settings:  settingsStore,
 		startedAt: time.Now(),
@@ -203,6 +212,7 @@ func (a *API) Router() http.Handler {
 		r.Delete("/oidc/link", a.handleOIDCUnlink)
 		r.Put("/devices/keys", a.handleRegisterDeviceKey)
 		r.Get("/devices/keys", a.handleDeviceKeys)
+		r.Delete("/devices/keys/{id}", a.handleDeleteDeviceKey)
 		r.Get("/users/me/key-backup", a.handleGetKeyBackup)
 		r.Put("/users/me/key-backup", a.handleSaveKeyBackup)
 		r.Delete("/users/me/key-backup", a.handleDeleteKeyBackup)
@@ -276,6 +286,7 @@ func (a *API) Router() http.Handler {
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(status)
 	if err := json.NewEncoder(w).Encode(v); err != nil {
 		// Response already committed; nothing we can do.

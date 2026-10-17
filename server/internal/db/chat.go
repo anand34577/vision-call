@@ -167,7 +167,7 @@ func (d *DB) PinMessage(id int64, pin bool) (*Message, error) {
 
 // PinnedInGroup returns a group's pinned messages, newest first.
 func (d *DB) PinnedInGroup(groupID int64) ([]*Message, error) {
-	rows, err := d.Query(`SELECT `+msgCols+` FROM messages WHERE group_id = ? AND pinned_at IS NOT NULL ORDER BY pinned_at DESC`, groupID)
+	rows, err := d.Query(`SELECT `+msgCols+` FROM messages WHERE group_id = ? AND pinned_at IS NOT NULL AND deleted_at IS NULL ORDER BY pinned_at DESC`, groupID)
 	if err != nil {
 		return nil, err
 	}
@@ -178,7 +178,7 @@ func (d *DB) PinnedInGroup(groupID int64) ([]*Message, error) {
 // PinnedInDM returns a DM thread's pinned messages, newest first.
 func (d *DB) PinnedInDM(a, b int64) ([]*Message, error) {
 	rows, err := d.Query(`SELECT `+msgCols+` FROM messages
-		WHERE pinned_at IS NOT NULL AND ((sender_id = ? AND recipient_id = ?) OR (sender_id = ? AND recipient_id = ?))
+		WHERE pinned_at IS NOT NULL AND deleted_at IS NULL AND ((sender_id = ? AND recipient_id = ?) OR (sender_id = ? AND recipient_id = ?))
 		ORDER BY pinned_at DESC`, a, b, b, a)
 	if err != nil {
 		return nil, err
@@ -220,7 +220,9 @@ func (d *DB) SearchMessages(userID int64, f SearchFilter) ([]*Message, error) {
 	if limit <= 0 || limit > 200 {
 		limit = 50
 	}
-	where := `deleted_at IS NULL AND (sender_id = ? OR recipient_id = ? OR group_id IN (SELECT group_id FROM group_members WHERE user_id = ?))`
+	// Group messages only while the user is still a member: a sender who was
+	// removed from a group must not keep searching its history.
+	where := `deleted_at IS NULL AND ((group_id IS NULL AND (sender_id = ? OR recipient_id = ?)) OR group_id IN (SELECT group_id FROM group_members WHERE user_id = ?))`
 	args := []any{userID, userID, userID}
 	if f.Query != "" {
 		// Encrypted content is ciphertext, not text — matching it against a
@@ -300,7 +302,17 @@ func (d *DB) DeleteMessage(id, requesterID int64) (*Message, error) {
 	} else if n == 0 {
 		return nil, ErrNotFound
 	}
+	d.scrubDeleted(id)
 	return d.GetMessage(id)
+}
+
+// scrubDeleted removes what a soft delete used to leave behind: the pin, the
+// mention list, the poll (question, options, votes) and reactions.
+func (d *DB) scrubDeleted(id int64) {
+	_, _ = d.Exec(`UPDATE messages SET pinned_at = NULL, mentions = '', enc_iv = NULL, enc_keys = NULL WHERE id = ?`, id)
+	_, _ = d.Exec(`DELETE FROM polls WHERE message_id = ?`, id) // options and votes cascade
+	_, _ = d.Exec(`DELETE FROM message_reactions WHERE message_id = ?`, id)
+	_, _ = d.Exec(`DELETE FROM saved_messages WHERE message_id = ?`, id)
 }
 
 // EditMessage updates a message's text in place and stamps edited_at. Only
@@ -330,6 +342,13 @@ func (d *DB) ToggleReaction(messageID, userID int64, emoji string) (bool, error)
 	if exists != 0 {
 		_, err := d.Exec(`DELETE FROM message_reactions WHERE message_id = ? AND user_id = ? AND emoji = ?`, messageID, userID, emoji)
 		return false, err
+	}
+	var mine int
+	if err := d.QueryRow(`SELECT COUNT(*) FROM message_reactions WHERE message_id = ? AND user_id = ?`, messageID, userID).Scan(&mine); err != nil {
+		return false, err
+	}
+	if mine >= 10 {
+		return false, ErrTooMany
 	}
 	_, err := d.Exec(`INSERT INTO message_reactions (message_id, user_id, emoji, created_at) VALUES (?, ?, ?, ?)`,
 		messageID, userID, emoji, now())
@@ -422,14 +441,16 @@ func (d *DB) CanSeeMessage(messageID, userID int64) (bool, error) {
 	if err != nil {
 		return false, err
 	}
+	// Group messages are visible to current members only (not to a former
+	// member who happens to be the sender).
+	if m.GroupID != nil {
+		return d.IsGroupMember(*m.GroupID, userID)
+	}
 	if m.SenderID == userID {
 		return true, nil
 	}
 	if m.RecipientID != nil {
 		return *m.RecipientID == userID, nil
-	}
-	if m.GroupID != nil {
-		return d.IsGroupMember(*m.GroupID, userID)
 	}
 	return false, nil
 }
@@ -454,7 +475,9 @@ func (d *DB) ListSavedMessages(userID int64, limit int) ([]*Message, error) {
 		limit = 200
 	}
 	rows, err := d.Query(`SELECT `+msgCols+` FROM messages m JOIN saved_messages s ON s.message_id = m.id
-		WHERE s.user_id = ? ORDER BY s.created_at DESC LIMIT ?`, userID, limit)
+		WHERE s.user_id = ? AND deleted_at IS NULL
+		  AND (group_id IS NULL OR group_id IN (SELECT group_id FROM group_members WHERE user_id = ?))
+		ORDER BY s.created_at DESC LIMIT ?`, userID, userID, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -737,8 +760,17 @@ func (d *DB) GroupMemberRole(groupID, userID int64) (string, error) {
 // SetGroupMemberRole promotes/demotes a member between "admin" and "member".
 // The owner's role is fixed and not managed through this path.
 func (d *DB) SetGroupMemberRole(groupID, userID int64, role string) error {
-	_, err := d.Exec(`UPDATE group_members SET role = ? WHERE group_id = ? AND user_id = ? AND role != 'owner'`, role, groupID, userID)
-	return err
+	res, err := d.Exec(`UPDATE group_members SET role = ? WHERE group_id = ? AND user_id = ? AND role != 'owner'`, role, groupID, userID)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		// The owner's role is fixed (no-op); a non-member is an error.
+		if ok, _ := d.IsGroupMember(groupID, userID); !ok {
+			return ErrNotFound
+		}
+	}
+	return nil
 }
 
 // GroupReadStates returns, per member, the id of the last message they've
@@ -913,10 +945,22 @@ func (d *DB) AddGroupMembers(groupID int64, userIDs []int64) error {
 	if err != nil {
 		return err
 	}
+	var lastID sql.NullInt64
+	if err := tx.QueryRow(`SELECT MAX(id) FROM messages WHERE group_id = ?`, groupID).Scan(&lastID); err != nil {
+		tx.Rollback()
+		return err
+	}
 	for _, uid := range userIDs {
 		if _, err := tx.Exec(insertIgnoreSQL(d.dialect, `group_members (group_id, user_id, role)`, `?, ?, 'member'`, `group_id, user_id`), groupID, uid); err != nil {
 			tx.Rollback()
 			return err
+		}
+		// A newcomer isn't "unread" on the whole back-catalogue.
+		if lastID.Valid {
+			if _, err := tx.Exec(insertIgnoreSQL(d.dialect, `group_read_state (group_id, user_id, last_read_message_id)`, `?, ?, ?`, `group_id, user_id`), groupID, uid, lastID.Int64); err != nil {
+				tx.Rollback()
+				return err
+			}
 		}
 	}
 	return tx.Commit()
@@ -954,6 +998,7 @@ func (d *DB) DeleteMessageAsModerator(id int64) (*Message, error) {
 	} else if n == 0 {
 		return nil, ErrNotFound
 	}
+	d.scrubDeleted(id)
 	return d.GetMessage(id)
 }
 
@@ -999,6 +1044,10 @@ func (d *DB) SetConversationPref(userID int64, p ConversationPref) error {
 	if !p.Muted && !p.Archived {
 		_, err := d.Exec(`DELETE FROM conversation_prefs WHERE user_id = ? AND kind = ? AND target_id = ?`, userID, p.Kind, p.TargetID)
 		return err
+	}
+	var nPrefs int
+	if err := d.QueryRow(`SELECT COUNT(*) FROM conversation_prefs WHERE user_id = ?`, userID).Scan(&nPrefs); err == nil && nPrefs >= 5000 {
+		return ErrTooMany
 	}
 	m, a := 0, 0
 	if p.Muted {

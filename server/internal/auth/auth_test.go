@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"fmt"
 	"net/http"
 	"sync"
 	"sync/atomic"
@@ -156,5 +157,25 @@ func TestSessionSlidesWhileUsed(t *testing.T) {
 	_ = d.CreateSession(id2, u.ID, HashToken(tok2), time.Now().Add(-time.Minute), "", "")
 	if _, err := ValidateSession(d, secret, tok2, 720*time.Hour); err == nil {
 		t.Fatal("expired session accepted")
+	}
+}
+
+func TestLimiterBoundedAndTOTPReplayStep(t *testing.T) {
+	l := newLoginLimiter(5, time.Hour)
+	defer l.Stop()
+	for i := 0; i < maxLimiterEntries+10; i++ {
+		l.Reserve(fmt.Sprintf("k%d", i))
+	}
+	l.mu.Lock()
+	n := len(l.attempts)
+	l.mu.Unlock()
+	if n > maxLimiterEntries {
+		t.Fatalf("limiter grew to %d entries", n)
+	}
+	secret, _ := NewTOTPSecret()
+	now := time.Now()
+	code, _ := totpCode(secret, uint64(now.Unix()/30))
+	if step, ok := VerifyTOTPStep(secret, code, now); !ok || step != now.Unix()/30 {
+		t.Fatalf("step %d ok=%v", step, ok)
 	}
 }

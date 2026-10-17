@@ -94,13 +94,24 @@ object SessionManager {
 
     // A partial wake lock only while a reconnect is pending (never while
     // connected), capped at 10 minutes per attempt so it can't drain the battery.
+    private var reconnectingSince = 0L
+
     private fun keepAwakeWhileReconnecting(pending: Boolean) {
         val pm = appContext.getSystemService(android.os.PowerManager::class.java) ?: return
         if (pending) {
+            val now = System.currentTimeMillis()
+            if (reconnectingSince == 0L) reconnectingSince = now
+            // After 10 minutes of failed attempts stop holding the CPU awake;
+            // retries continue on the normal timer and the next success resets this.
+            if (now - reconnectingSince > 10 * 60 * 1000L) {
+                reconnectWakeLock?.let { if (it.isHeld) it.release() }
+                return
+            }
             val lock = reconnectWakeLock ?: pm.newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK, "visioncall:reconnect")
                 .also { it.setReferenceCounted(false); reconnectWakeLock = it }
             lock.acquire(10 * 60 * 1000L)
         } else {
+            reconnectingSince = 0L
             reconnectWakeLock?.let { if (it.isHeld) it.release() }
         }
     }
@@ -175,6 +186,12 @@ object SessionManager {
         com.videocall.mobile.call.CallRepository.hangup()
         com.videocall.mobile.chat.ChatRepository.clear()
         com.videocall.mobile.chat.Crypto.clearOnLogout()
+        // The SSO WebView keeps the identity-provider session and our cookies;
+        // clear them so the next person on a shared phone isn't signed in as this one.
+        runCatching {
+            android.webkit.CookieManager.getInstance().removeAllCookies(null)
+            android.webkit.CookieManager.getInstance().flush()
+        }
         _presence.value = emptyMap()
         _users.value = emptyList()
     }

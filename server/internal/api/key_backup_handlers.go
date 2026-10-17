@@ -48,6 +48,13 @@ func (a *API) handleSaveKeyBackup(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "invalid backup data")
 		return
 	}
+	var kdf struct {
+		Iterations int `json:"iterations"`
+	}
+	if json.Unmarshal(req.Data, &kdf) != nil || kdf.Iterations < 200_000 || kdf.Iterations > 10_000_000 {
+		writeErr(w, http.StatusBadRequest, "invalid backup key-derivation settings")
+		return
+	}
 	if req.PublicKeyJWK == "" || len(req.PublicKeyJWK) > 4096 || !json.Valid([]byte(req.PublicKeyJWK)) {
 		writeErr(w, http.StatusBadRequest, "invalid public key")
 		return

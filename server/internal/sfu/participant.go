@@ -17,6 +17,10 @@ import (
 // (a getDisplayMedia() the user cancelled, a renegotiation that silently
 // failed) would leave the next unrelated camera track mislabeled as screen
 // forever.
+// subOfferTimeout is how long a subscriber offer may wait for its answer
+// before a new one is allowed.
+const subOfferTimeout = 10 * time.Second
+
 const screenPendingTTL = 5 * time.Second
 
 type Participant struct {
@@ -34,6 +38,7 @@ type Participant struct {
 	pubICEQueue         []ICE
 	subMu               sync.Mutex
 	subPending          bool
+	subPendingAt        time.Time
 	subNeedsRenegotiate bool
 	// screenMu guards screenPending/screenPendingAt: set when the client's
 	// track-state says screen share is starting, so the next published video
@@ -209,8 +214,12 @@ func (p *Participant) renegotiateSubLocked() {
 		return
 	}
 	if p.subPending {
-		p.subNeedsRenegotiate = true
-		return
+		// A lost offer or failed answer must not block renegotiation forever.
+		if time.Since(p.subPendingAt) < subOfferTimeout {
+			p.subNeedsRenegotiate = true
+			return
+		}
+		p.subPending = false
 	}
 	offer, err := p.sub.CreateOffer(nil)
 	if err != nil {
@@ -220,6 +229,7 @@ func (p *Participant) renegotiateSubLocked() {
 		return
 	}
 	p.subPending = true
+	p.subPendingAt = time.Now()
 	p.send("sfu:sub-offer", offer)
 }
 
@@ -230,6 +240,8 @@ func (p *Participant) onSubAnswer(sdp SDP) {
 		return
 	}
 	if err := p.sub.SetRemoteDescription(sdp); err != nil {
+		// Drop the stuck offer so the next change can renegotiate.
+		p.subPending = false
 		return
 	}
 	p.subPending = false

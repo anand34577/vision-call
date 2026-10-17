@@ -95,7 +95,7 @@ export default function AttachmentPreview({
 
         <p className="text-xs text-ink-muted">
           {files.length} {files.length === 1 ? "file" : "files"} · {fmtBytes(total)}
-          {encrypted ? " · the caption is end-to-end encrypted, the file itself is stored on your server" : ""}
+          {encrypted ? " · only the caption is end-to-end encrypted; the file itself is NOT encrypted and is readable on your server" : ""}
         </p>
 
         <input

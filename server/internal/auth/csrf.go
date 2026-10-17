@@ -28,7 +28,7 @@ func generateCSRFToken() (string, error) {
 // it needs to make its first mutating request (the app's initial GET /me
 // covers this for an existing session that predates this feature).
 func EnsureCSRFCookie(w http.ResponseWriter, r *http.Request, secureCookie bool) {
-	if cookie, err := r.Cookie(CSRFCookieName); err == nil && len(cookie.Value) == 64 {
+	if cookie, err := r.Cookie(CSRFCookieName); err == nil && isHex64(cookie.Value) {
 		return
 	}
 	token, err := generateCSRFToken()
@@ -61,4 +61,12 @@ func RequireCSRF(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func isHex64(s string) bool {
+	if len(s) != 64 {
+		return false
+	}
+	_, err := hex.DecodeString(s)
+	return err == nil
 }

@@ -168,7 +168,7 @@ private fun rememberPlain(m: Message): String {
     val ctx = androidx.compose.ui.platform.LocalContext.current
     val text by produceState(if (m.is_encrypted) "Decrypting…" else m.content, m.id) {
         if (m.is_encrypted) {
-            value = runCatching { Crypto.decryptMessageContent(ctx, m.id, m.is_encrypted, m.content, m.enc_iv, m.enc_keys) }.getOrNull()
+            value = runCatching { Crypto.decryptMessageContent(ctx, m.id, m.is_encrypted, m.content, m.enc_iv, m.enc_keys, m.sender_id, m.recipient_id, m.group_id) }.getOrNull()
                 ?: "Encrypted message (can't decrypt on this device)"
         }
     }

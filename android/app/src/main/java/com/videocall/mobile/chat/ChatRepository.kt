@@ -450,7 +450,7 @@ object ChatRepository {
         scope.launch {
             for (m in encrypted) {
                 val plain = runCatching {
-                    Crypto.decryptMessageContent(appContext, m.id, m.is_encrypted, m.content, m.enc_iv, m.enc_keys)
+                    Crypto.decryptMessageContent(appContext, m.id, m.is_encrypted, m.content, m.enc_iv, m.enc_keys, m.sender_id, m.recipient_id, m.group_id)
                 }.getOrNull()
                 mutateEverywhere(m.id) { it.copy(decryptedContent = plain ?: "Can't decrypt this message on this device") }
             }
@@ -544,11 +544,14 @@ object ChatRepository {
                         else "Not sent: ${missing.size} recipients have not set up encryption yet"
                     return@launch
                 }
-                val enc = runCatching { Crypto.encryptForRecipients(appContext, text, recipientIds) }.getOrNull()
+                val myId = SessionManager.me.value?.id ?: 0L
+                val convoKey = Crypto.convoOf(myId, (convo as? Convo.Dm)?.peerId, (convo as? Convo.GroupChat)?.groupId) ?: ""
+                val encResult = runCatching { Crypto.encryptForRecipients(appContext, text, recipientIds, myId, convoKey) }
+                val enc = encResult.getOrNull()
                 if (enc == null) {
                     pendingAcks.remove(clientId)?.third?.cancel()
                     markFailed(convo, optimistic.id)
-                    _sendError.value = "Couldn't encrypt the message"
+                    _sendError.value = encResult.exceptionOrNull()?.message ?: "Couldn't encrypt the message"
                     return@launch
                 }
                 val ok = SessionManager.ws.send("message:send", mapOf(
@@ -773,7 +776,7 @@ object ChatRepository {
     private suspend fun plainText(m: Message): String {
         if (m.deleted_at != null) return "(deleted)"
         if (!m.is_encrypted) return m.content
-        return runCatching { Crypto.decryptMessageContent(appContext, m.id, m.is_encrypted, m.content, m.enc_iv, m.enc_keys) }.getOrNull()
+        return runCatching { Crypto.decryptMessageContent(appContext, m.id, m.is_encrypted, m.content, m.enc_iv, m.enc_keys, m.sender_id, m.recipient_id, m.group_id) }.getOrNull()
             ?: "(can't decrypt on this device)"
     }
 

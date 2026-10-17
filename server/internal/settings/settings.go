@@ -190,7 +190,10 @@ func New(dbh *db.DB, cfg *config.Config, logLevel *slog.LevelVar) *Store {
 		if !f.Dynamic {
 			continue
 		}
-		if v, ok := os.LookupEnv(f.Key); ok {
+		// An empty value counts as unset, matching config.Load; otherwise a
+		// stray "KEY=" line would pin the setting to "" (e.g. silently
+		// disabling the upload block-list).
+		if v, ok := os.LookupEnv(f.Key); ok && v != "" {
 			s.envSet[f.Key] = v
 		}
 	}

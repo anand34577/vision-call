@@ -51,6 +51,8 @@ func (c *Client) handleRoomJoin(env *Envelope) {
 		c.roomJoinError("invalid room id")
 		return
 	}
+	// Resolved before taking the global call lock: it may do a DNS lookup.
+	advertise := c.advertiseIP()
 	c.hub.callStateMu.Lock()
 	defer c.hub.callStateMu.Unlock()
 	c.hub.promote(c)
@@ -58,7 +60,19 @@ func (c *Client) handleRoomJoin(env *Envelope) {
 		c.roomJoinError("you are already in a call")
 		return
 	}
-	_, err := c.hub.engine.Join(p.RoomID, c.user.ID, c.user.DisplayName, c.user.AvatarFileID, p.Video, p.Resume, c.advertiseIP(), c.hub.signalFunc(c.user.ID))
+	// Re-check membership under the lock so a removal that raced the check
+	// above can't slip a removed member into the call.
+	if groupID, ok := roomGroupID(p.RoomID); ok {
+		if member, err := c.hub.db.IsGroupMember(groupID, c.user.ID); err != nil || !member {
+			c.roomJoinError("you are not a member of this group")
+			return
+		}
+	}
+	if c.hub.isEjected(p.RoomID, c.user.ID) {
+		c.roomJoinError("you were removed from this call by the host")
+		return
+	}
+	_, err := c.hub.engine.Join(p.RoomID, c.user.ID, c.user.DisplayName, c.user.AvatarFileID, p.Video, p.Resume, advertise, c.hub.signalFunc(c.user.ID))
 	if err != nil {
 		c.roomJoinError(err.Error())
 		return
@@ -132,7 +146,12 @@ func (c *Client) handleRoomKickRequest(env *Envelope) {
 	if err := json.Unmarshal(env.Data, &p); err != nil || p.TargetUserID == 0 {
 		return
 	}
-	if !c.hub.engine.KickRequest(c.user.ID, p.TargetUserID, c.user.Role == "admin") {
+	roomID, inRoom := c.hub.engine.RoomIDForUser(p.TargetUserID)
+	if c.hub.engine.KickRequest(c.user.ID, p.TargetUserID, c.user.Role == "admin") {
+		if inRoom {
+			c.hub.markEjected(roomID, p.TargetUserID)
+		}
+	} else {
 		c.Send("error", map[string]string{"message": "only the call host can remove participants"})
 	}
 }
@@ -365,6 +384,7 @@ func (h *Hub) onRoomEvent(ev sfu.Event) {
 			"room_id": ev.RoomID, "participant": ev.Info,
 		}, nil)
 	case sfu.EventRoomClosed:
+		h.clearEjected(ev.RoomID)
 		// Tell the group the call is over so "join call" indicators clear —
 		// room:invite set them, and nothing else ever unset them. A new
 		// event (not room:closed): clients treat room:closed as "end my call".
