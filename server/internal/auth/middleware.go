@@ -38,10 +38,14 @@ func RequireAuth(dbh *db.DB, secret []byte, isSecure func(*http.Request) bool, s
 				return
 			}
 			EnsureCSRFCookie(w, r, isSecure(r))
-			ctx := context.WithValue(r.Context(), userKey, user)
-			next.ServeHTTP(w, r.WithContext(ctx))
+			next.ServeHTTP(w, r.WithContext(WithUser(r.Context(), user)))
 		})
 	}
+}
+
+// WithUser returns ctx carrying user as the signed-in account.
+func WithUser(ctx context.Context, user *db.User) context.Context {
+	return context.WithValue(ctx, userKey, user)
 }
 
 func CurrentUser(r *http.Request) *db.User {

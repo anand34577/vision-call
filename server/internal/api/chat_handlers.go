@@ -672,6 +672,14 @@ func (a *API) handleRemoveGroupMember(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "the group owner cannot be removed; delete the group instead")
 		return
 	}
+	// Group admins manage members, not each other: removing an admin is the
+	// owner's (or a site admin's) call, same as changing roles.
+	if !isSelf && group.CreatedBy != me.ID && me.Role != "admin" {
+		if role, err := a.db.GroupMemberRole(id, targetID); err == nil && role == "admin" {
+			writeErr(w, http.StatusForbidden, "only the group owner can remove another admin")
+			return
+		}
+	}
 	member, err := a.db.IsGroupMember(id, targetID)
 	if err != nil || !member {
 		writeErr(w, http.StatusNotFound, "not a member of this group")

@@ -238,7 +238,7 @@ class DirectCall(
     fun close() {
         closed = true
         netMonitor.stop()
-        pc?.close()
+        pc?.dispose() // close() alone leaks the native connection
         pc = null
         media.close()
         screenCapture?.close()

@@ -36,7 +36,15 @@ export default function Chats() {
   const [groupName, setGroupName] = useState("");
   const [members, setMembers] = useState<number[]>([]);
   const [memberSearch, setMemberSearch] = useState("");
-  const [mobilePanel, setMobilePanel] = useState(false);
+  // A chat opened from elsewhere (call history, a notification, Ctrl+K)
+  // should show the chat itself on a phone, not the list.
+  const openedAt = useChats((s) => s.openedAt);
+  const [mobilePanel, setMobilePanel] = useState(() => Date.now() - openedAt < 2000);
+  const [seenOpenedAt, setSeenOpenedAt] = useState(openedAt);
+  if (openedAt !== seenOpenedAt) {
+    setSeenOpenedAt(openedAt);
+    setMobilePanel(true);
+  }
   const [groupError, setGroupError] = useState<string | null>(null);
   const [creatingGroup, setCreatingGroup] = useState(false);
   const [groupPublic, setGroupPublic] = useState(false);
@@ -247,7 +255,7 @@ export default function Chats() {
               <input
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="Filter people and groups"
+                placeholder="Filter people and groups (Ctrl+K to jump)"
                 aria-label="Filter people and groups"
                 className={`${inputCls} pl-9 pr-8`}
               />

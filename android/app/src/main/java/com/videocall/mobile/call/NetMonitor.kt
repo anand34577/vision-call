@@ -5,6 +5,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.suspendCancellableCoroutine
 import org.webrtc.PeerConnection
 import kotlin.coroutines.resume
@@ -70,7 +71,13 @@ class NetworkMonitor(
         if (job != null) return
         job = scope.launch {
             while (isActive) {
-                val qualities = getPCs().map { scoreQuality(sampleInbound(it)) }
+                // Re-read each connection right before sampling it: one can be
+                // disposed (call rejoin) while an earlier sample is in flight, and
+                // a disposed one must never be touched. The timeout covers a
+                // stats callback that never arrives.
+                val qualities = getPCs().indices.map { i ->
+                    scoreQuality(withTimeoutOrNull(2000) { sampleInbound(getPCs().getOrNull(i)) })
+                }
                 val worst = when {
                     qualities.contains(NetQuality.POOR) -> NetQuality.POOR
                     qualities.contains(NetQuality.FAIR) -> NetQuality.FAIR

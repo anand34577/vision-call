@@ -23,6 +23,7 @@ import { ws } from "../lib/ws";
 import { getNotificationPermissionStatus, notificationsSupported, requestNotificationPermission } from "../lib/media";
 import { toast } from "../store/toast";
 import { KeyBackupRestorePrompt } from "../components/KeyBackup";
+import { QuickSwitcher } from "../components/QuickSwitcher";
 import { Avatar, PresenceDot, Menu, MenuItem } from "../components/ui";
 import { THEMES, savePreferencesToDb, type ThemeId } from "../lib/theme";
 import Chats from "./Chats";
@@ -70,6 +71,14 @@ export default function Shell() {
     return Object.values(unread).reduce((sum, n) => sum + (n || 0), 0);
   }, [unread]);
 
+  // Unread count on the browser tab and the installed app's icon, so a
+  // background tab still shows there's something new.
+  useEffect(() => {
+    document.title = totalUnread > 0 ? `(${totalUnread}) Vision Call` : "Vision Call";
+    const nav = navigator as Navigator & { setAppBadge?: (n: number) => Promise<void>; clearAppBadge?: () => Promise<void> };
+    (totalUnread > 0 ? nav.setAppBadge?.(totalUnread) : nav.clearAppBadge?.())?.catch(() => {});
+  }, [totalUnread]);
+
   useEffect(() => {
     const onHashChange = () => {
       setView(parseHash());
@@ -108,10 +117,13 @@ export default function Shell() {
   const setMyStatus = usePresence((s) => s.setMyStatus);
 
   const awayRef = useRef(false);
+  // A status picked by hand (Away/DND) sticks until changed by hand; only
+  // the automatic idle-away follows mouse and keyboard activity.
+  const manualRef = useRef(false);
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout>;
     const send = (status: "online" | "away") => {
-      if (usePresence.getState().myStatus === "dnd") return;
+      if (manualRef.current || usePresence.getState().myStatus === "dnd") return;
       if (awayRef.current !== (status === "away")) {
         awayRef.current = status === "away";
         usePresence.setState({ myStatus: status });
@@ -138,6 +150,7 @@ export default function Shell() {
 
   const pickStatus = (status: "online" | "away" | "dnd") => {
     awayRef.current = status === "away";
+    manualRef.current = status !== "online";
     setMyStatus(status);
   };
 
@@ -185,6 +198,7 @@ export default function Shell() {
   return (
     <div className="flex flex-col h-full app-shell text-ink">
       <KeyBackupRestorePrompt userID={me.id} />
+      <QuickSwitcher />
       {askNotify && (
         <div className="bg-brand/10 border-b border-brand/20 text-ink text-xs px-4 py-2 flex items-center justify-center gap-3 font-medium shrink-0 z-50 animate-fade-in">
           <Bell className="h-3.5 w-3.5 text-brand" />

@@ -240,8 +240,11 @@ func (p *Participant) onSubAnswer(sdp SDP) {
 		return
 	}
 	if err := p.sub.SetRemoteDescription(sdp); err != nil {
-		// Drop the stuck offer so the next change can renegotiate.
+		// That offer's tracks never got negotiated: offer again rather than
+		// leaving them (and any queued changes) waiting for an unrelated change.
 		p.subPending = false
+		p.subNeedsRenegotiate = false
+		p.renegotiateSubLocked()
 		return
 	}
 	p.subPending = false

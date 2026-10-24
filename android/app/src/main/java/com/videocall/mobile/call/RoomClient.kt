@@ -182,7 +182,7 @@ class RoomClient(
         rejoining = true
         try {
             makingOffer = false
-            pub?.close(); sub?.close()
+            pub?.dispose(); sub?.dispose() // close() alone leaks the native connection
             pub = null; sub = null
             camSender = null; screenSender = null
             pendingPubCandidates.clear(); pendingSubCandidates.clear()
@@ -331,13 +331,15 @@ class RoomClient(
         closed = true
         netMonitor.stop()
         if (notifyServer && roomId.isNotEmpty()) send("room:leave", emptyMap())
+        // Connections first, then the local tracks they send; dispose() (not
+        // close()) frees the native connection.
+        pub?.dispose()
+        sub?.dispose()
+        pub = null
+        sub = null
         media.close()
         screenCapture?.close()
         screenCapture = null
-        pub?.close()
-        sub?.close()
-        pub = null
-        sub = null
         remoteTracks.clear()
         roomId = ""
     }

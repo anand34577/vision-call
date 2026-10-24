@@ -117,6 +117,7 @@ let room: RoomClient | null = null;
 let wsRegistered = false;
 let callEpoch = 0;
 let p2pReconnectTimer: ReturnType<typeof setTimeout> | null = null;
+let roomInviteTimer: ReturnType<typeof setTimeout> | null = null;
 
 function clearP2PReconnectTimer() {
   if (p2pReconnectTimer) {
@@ -853,6 +854,13 @@ export const useCalls = create<CallsState>((set, get) => ({
       if (get().status !== "idle" || get().roomInvite || get().incoming) return;
       set({ roomInvite: { roomId: d.room_id, groupName: d.group_name, from: d.from } });
       startRingtone();
+      // Stop ringing like a missed 1:1 call would; the group keeps its
+      // "join call" badge, so the call can still be joined from the chat.
+      if (roomInviteTimer) clearTimeout(roomInviteTimer);
+      roomInviteTimer = setTimeout(() => {
+        roomInviteTimer = null;
+        if (get().roomInvite?.roomId === d.room_id) get().declineRoomInvite();
+      }, 45000);
       notify("Group call", `${d.from.display_name} started a call in ${d.group_name}`, { tag: "room", inApp: false, sound: false });
     });
 
@@ -1139,6 +1147,11 @@ export const useCalls = create<CallsState>((set, get) => ({
           room.resume();
         }
       }
+    });
+
+    // I joined this call on another device: stop ringing here.
+    ws.on("room:answered", (d) => {
+      if (get().roomInvite?.roomId === d?.room_id) get().declineRoomInvite();
     });
 
     // A group's call finished (last participant left): drop its "join" badge.

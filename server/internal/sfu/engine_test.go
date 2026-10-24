@@ -79,3 +79,26 @@ func TestClaimHost(t *testing.T) {
 		t.Fatal("owner should be the only host")
 	}
 }
+
+// TestRejoinKeepsRoom: a page reload (rejoin without resume) while alone in
+// a room must not close and recreate it — that re-rings the whole group.
+func TestRejoinKeepsRoom(t *testing.T) {
+	e := NewEngine(Config{MaxParticipants: 8})
+	defer e.Close()
+	var mu sync.Mutex
+	kinds := map[string]int{}
+	e.OnEvent = func(ev Event) { mu.Lock(); kinds[ev.Kind]++; mu.Unlock() }
+	for i := 0; i < 2; i++ {
+		if _, err := e.Join("group:1", 1, "a", nil, true, false, "", noopSignal); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if kinds[EventRoomCreated] != 1 || kinds[EventRoomClosed] != 0 {
+		t.Fatalf("rejoin recreated the room: %v", kinds)
+	}
+	if !e.lookup(1).infoSnapshot().Host {
+		t.Fatal("rejoined sole participant should be host")
+	}
+}

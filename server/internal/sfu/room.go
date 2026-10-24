@@ -131,7 +131,13 @@ func (r *Room) isEmptyThenDelete() bool {
 // remove tears down a participant: closes its PCs, un-forwards its tracks,
 // emits left, promotes a new host when the host leaves, and closes the room
 // when the last person leaves.
-func (r *Room) remove(userID int64) {
+func (r *Room) remove(userID int64) { r.drop(userID, true) }
+
+// drop is remove with control over closing an emptied room. Join passes
+// false when swapping out a stale participant of the same user (a page
+// reload): closing and recreating the room there would re-ring the whole
+// group and start a new call record.
+func (r *Room) drop(userID int64, closeIfEmpty bool) {
 	r.mu.Lock()
 	p := r.participants[userID]
 	if p == nil {
@@ -181,6 +187,9 @@ func (r *Room) remove(userID int64) {
 	r.engine.emit(Event{Kind: EventLeft, RoomID: r.id, UserID: userID})
 	if promotedInfo != nil {
 		r.engine.emit(Event{Kind: EventUpdated, RoomID: r.id, UserID: promotedInfo.UserID, Info: *promotedInfo})
+	}
+	if !closeIfEmpty {
+		return
 	}
 	if deleted := r.isEmptyThenDelete(); deleted {
 		r.engine.emit(Event{Kind: EventRoomClosed, RoomID: r.id})
