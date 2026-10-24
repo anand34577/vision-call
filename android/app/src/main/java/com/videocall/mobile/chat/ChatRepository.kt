@@ -314,7 +314,7 @@ object ChatRepository {
         }
         ws.on("message:deleted") { d ->
             val id = d.long("id") ?: return@on
-            mutateEverywhere(id) { it.copy(deleted_at = "now", content = "") }
+            mutateEverywhere(id) { it.copy(deleted_at = "now", content = "", file = null, file_id = null, decryptedContent = null) }
         }
         ws.on("message:edited") { d ->
             val msg = decodeMessage(d.obj()["message"] ?: return@on) ?: return@on
@@ -428,8 +428,6 @@ object ChatRepository {
         }
     }
 
-    private fun e2ePrefsHas(convo: Convo): Boolean = ::appContext.isInitialized && e2ePrefs(appContext).contains(convo.key)
-
     /** Tries every encrypted message again, e.g. after restoring the key backup. */
     fun redecryptAll() {
         val cleared = _messages.value.mapValues { (_, list) -> list.map { if (it.is_encrypted) it.copy(decryptedContent = null) else it } }
@@ -515,33 +513,15 @@ object ChatRepository {
                 // Re-checked every send (like web): a recipient with no device
                 // key would otherwise be silently left out of the message.
                 val missing = Crypto.usersMissingKeys(recipientIds.filter { it != me.id }.distinct())
-                // Someone here has never signed in on any device, so there's no
-                // key to encrypt for. With encryption on only by default, send it
-                // unencrypted and say so; if it was turned on by hand, don't.
-                if (missing.isNotEmpty() && !e2ePrefsHas(convo)) {
-                    _sendError.value = if (missing.size == 1) "Sent without end-to-end encryption: the other person hasn't signed in on any device yet"
-                        else "Sent without end-to-end encryption: ${missing.size} people haven't signed in on any device yet"
-                    val ok = SessionManager.ws.send("message:send", mapOf(
-                        "client_id" to clientId,
-                        "recipient_id" to (convo as? Convo.Dm)?.peerId,
-                        "group_id" to (convo as? Convo.GroupChat)?.groupId,
-                        "file_id" to fileId,
-                        "reply_to_id" to replyToId,
-                        "mentions" to mentionIds(text),
-                        "thread_root_id" to threadRootId,
-                        "content" to text,
-                    ))
-                    if (!ok) {
-                        pendingAcks.remove(clientId)?.third?.cancel()
-                        markFailed(convo, optimistic.id)
-                    }
-                    return@launch
-                }
+                // Never fall back to plaintext on the sender's behalf (same as
+                // web): a server that hides someone's keys could otherwise force
+                // every message into the clear. The user can turn encryption off.
                 if (missing.isNotEmpty()) {
                     pendingAcks.remove(clientId)?.third?.cancel()
                     markFailed(convo, optimistic.id)
-                    _sendError.value = if (missing.size == 1) "Not sent: a recipient has not set up encryption on any device yet"
-                        else "Not sent: ${missing.size} recipients have not set up encryption yet"
+                    _sendError.value = (if (missing.size == 1) "Not sent: a recipient hasn't signed in on any device yet."
+                        else "Not sent: ${missing.size} recipients haven't signed in on any device yet.") +
+                        " Turn encryption off for this chat to send anyway."
                     return@launch
                 }
                 val myId = SessionManager.me.value?.id ?: 0L
@@ -648,10 +628,13 @@ object ChatRepository {
     }
 
     private var lastTypingSent = 0L
+    private var lastTypingKey = ""
     fun sendTyping(convo: Convo) {
         val now = System.currentTimeMillis()
-        if (now - lastTypingSent < 2500) return
+        // Throttled per chat, so switching chats doesn't swallow the first ping.
+        if (convo.key == lastTypingKey && now - lastTypingSent < 2500) return
         lastTypingSent = now
+        lastTypingKey = convo.key
         SessionManager.ws.send("message:typing", mapOf(
             "recipient_id" to (convo as? Convo.Dm)?.peerId,
             "group_id" to (convo as? Convo.GroupChat)?.groupId,

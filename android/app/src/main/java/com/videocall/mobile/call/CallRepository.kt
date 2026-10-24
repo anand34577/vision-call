@@ -213,6 +213,10 @@ object CallRepository {
             val invite = _state.value.roomInvite ?: return@on
             if (d.str("room_id") == invite.roomId) _state.value = _state.value.copy(roomInvite = null)
         }
+        // Joined this call on another device: stop ringing here.
+        ws.on("room:answered") { d ->
+            if (d.str("room_id") == _state.value.roomInvite?.roomId) _state.value = _state.value.copy(roomInvite = null)
+        }
         ws.on("room:closed") { d ->
             // A group call that ended while it was still ringing here.
             val invite = _state.value.roomInvite
