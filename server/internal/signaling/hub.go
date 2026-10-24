@@ -322,7 +322,7 @@ func fansOut(typ string) bool {
 		return true
 	}
 	switch typ {
-	case "call:invite", "call:ended", "room:invite", "account:updated", "conversation:prefs":
+	case "call:invite", "call:ended", "room:invite", "room:ended", "room:answered", "account:updated", "conversation:prefs":
 		return true
 	}
 	return false

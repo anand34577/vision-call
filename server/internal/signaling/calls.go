@@ -277,7 +277,13 @@ func (c *Client) handleCallHangup(env *Envelope) {
 	if !ok {
 		return
 	}
-	m.hub.sendToUser(other, "call:ended", map[string]any{"call_id": ended.id, "reason": "hangup"})
+	// The caller giving up before an answer is a missed call for the callee,
+	// so their app refreshes call history instead of showing a plain hang-up.
+	otherReason := "hangup"
+	if call.state == "ringing" && c.user.ID == call.callerID {
+		otherReason = "missed"
+	}
+	m.hub.sendToUser(other, "call:ended", map[string]any{"call_id": ended.id, "reason": otherReason})
 	c.Send("call:ended", map[string]any{"call_id": ended.id, "reason": "hangup"})
 }
 

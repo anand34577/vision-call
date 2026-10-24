@@ -78,6 +78,8 @@ func (c *Client) handleRoomJoin(env *Envelope) {
 		return
 	}
 	c.hub.cancelRoomLeave(c.user.ID)
+	// Joined on this device: stop the group-call ring on the user's others.
+	c.hub.sendToOthers(c, "room:answered", map[string]any{"room_id": p.RoomID})
 	// The room's owner (private room owner / group creator) is always host,
 	// even when a guest happened to join first — otherwise that guest could
 	// mute or remove the owner from their own room.

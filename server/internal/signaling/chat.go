@@ -411,8 +411,18 @@ func (c *Client) handleMessageEdit(env *Envelope) {
 	// need re-wrapping the new content key to every recipient device all
 	// over again. Simplest safe behavior: encrypted messages aren't
 	// editable (delete and resend instead).
-	if existing, err := c.hub.db.GetMessage(p.ID); err == nil && existing.IsEncrypted {
+	existing, err := c.hub.db.GetMessage(p.ID)
+	if err != nil {
+		c.Send("error", map[string]string{"message": "could not edit message"})
+		return
+	}
+	if existing.IsEncrypted {
 		c.Send("error", map[string]string{"message": "encrypted messages can't be edited — delete and resend instead"})
+		return
+	}
+	// Someone removed from a group must not keep rewriting what its members see.
+	if !c.canSeeMessage(existing) {
+		c.Send("error", map[string]string{"message": "could not edit message"})
 		return
 	}
 	p.Content = strings.TrimSpace(p.Content)
