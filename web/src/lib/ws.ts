@@ -83,6 +83,20 @@ class WSClient {
     };
   }
 
+  constructor() {
+    // Network back or tab shown again: retry now instead of waiting out a
+    // backoff of up to 15s.
+    const retryNow = () => {
+      if (!this.wantConnected || this.ws || document.hidden) return;
+      if (this.timer) clearTimeout(this.timer);
+      this.timer = null;
+      this.backoff = 1000;
+      this.connect();
+    };
+    window.addEventListener("online", retryNow);
+    document.addEventListener("visibilitychange", retryNow);
+  }
+
   private scheduleReconnect() {
     if (this.timer) return;
     this.timer = setTimeout(() => {

@@ -88,6 +88,10 @@ export default function App() {
       void useChats.getState().fetchConvoPrefs();
       void useChats.getState().fetchRecent();
       useCalls.getState().fetchHistory();
+      // Group messages aren't replayed on reconnect (only undelivered DMs
+      // are), so reload the open chat or it keeps a gap until reopened.
+      const active = useChats.getState().active;
+      if (active) void useChats.getState().loadMessages(active);
     });
     const offPresence = ws.on("presence:update", (d) => {
       useDirectory.getState().applyPresence(d.user_id, d.status);

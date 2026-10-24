@@ -149,6 +149,8 @@ interface ChatsState {
   fetchGroupReads: (groupID: number) => Promise<void>;
 
   setActive: (c: Convo | null) => void;
+  /** Bumped by openDm/openGroup so a phone layout can switch to the chat. */
+  openedAt: number;
   clearSendError: () => void;
   openDm: (peerID: number) => void;
   openGroup: (groupID: number) => void;
@@ -189,6 +191,7 @@ interface ChatsState {
 }
 
 let lastTypingSent = 0;
+let lastTypingKey = "";
 let wsRegistered = false;
 let optimisticSequence = 0;
 
@@ -283,12 +286,13 @@ export const useChats = create<ChatsState>((set, get) => ({
   encryptedConvos: {},
   decryptedContent: {},
 
+  openedAt: 0,
   setActive: (c) => set({ active: c }),
   clearSendError: () => set({ sendError: null }),
 
   openDm: (peerID) => {
     const c: Convo = { kind: "dm", peerID };
-    set({ active: c });
+    set({ active: c, openedAt: Date.now() });
     get().hydrateEncryptedFlag(c);
     get().loadMessages(c);
     get().markRead(c);
@@ -296,7 +300,7 @@ export const useChats = create<ChatsState>((set, get) => ({
 
   openGroup: (groupID) => {
     const c: Convo = { kind: "group", groupID };
-    set({ active: c });
+    set({ active: c, openedAt: Date.now() });
     get().hydrateEncryptedFlag(c);
     get().loadMessages(c);
     get().markRead(c);
@@ -655,8 +659,10 @@ export const useChats = create<ChatsState>((set, get) => ({
 
   sendTyping: (c) => {
     const now = Date.now();
-    if (now - lastTypingSent < 2500) return;
+    // Throttled per chat, so switching chats doesn't swallow the first ping.
+    if (lastTypingKey === key(c) && now - lastTypingSent < 2500) return;
     lastTypingSent = now;
+    lastTypingKey = key(c);
     ws.send("message:typing", {
       recipient_id: c.kind === "dm" ? c.peerID : null,
       group_id: c.kind === "group" ? c.groupID : null,

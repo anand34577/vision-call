@@ -85,7 +85,9 @@ export function useFocusTrap(
     const first = initialFocusRef?.current ?? container?.querySelector<HTMLElement>("[autofocus]") ?? container?.querySelector<HTMLElement>(
       "[autofocus], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href]",
     );
-    (first ?? container)?.focus();
+    // React applies autoFocus itself (no attribute reaches the DOM), before
+    // this effect runs: keep that focus instead of moving it to the first button.
+    if (!container?.contains(document.activeElement)) (first ?? container)?.focus();
 
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
