@@ -166,7 +166,7 @@ func (e *Engine) Join(roomID string, userID int64, displayName string, avatarFil
 			room.mu.Unlock()
 			e.mu.Unlock()
 			e.log.Debug("sfu: dropping stale participant before rejoin", "room_id", roomID, "user_id", userID, "resume", resume)
-			room.remove(userID) // page reload: drop stale participant first
+			room.drop(userID, false) // page reload: drop stale participant, keep the room
 			continue
 		}
 		if len(room.participants) >= e.cfg.MaxParticipants {
@@ -202,6 +202,10 @@ func (e *Engine) Join(roomID string, userID int64, displayName string, avatarFil
 			room.mu.Unlock()
 			e.mu.Unlock()
 			e.log.Error("sfu: create subscriber PeerConnection", "room_id", roomID, "user_id", userID, "err", err)
+			// A room kept open for this rejoin must not linger empty.
+			if !created && room.isEmptyThenDelete() {
+				e.emit(Event{Kind: EventRoomClosed, RoomID: roomID})
+			}
 			return nil, err
 		}
 		e.users[userID] = room
