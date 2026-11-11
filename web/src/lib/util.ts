@@ -16,8 +16,8 @@ export function initials(name: string): string {
 }
 
 const AVATAR_COLORS = [
-  "bg-indigo-500", "bg-emerald-500", "bg-rose-500", "bg-amber-500",
-  "bg-sky-500", "bg-violet-500", "bg-teal-500", "bg-orange-500",
+  "bg-brand", "bg-success", "bg-error", "bg-warning",
+  "bg-info", "bg-brand", "bg-info", "bg-warning",
 ];
 
 export function avatarColor(id: number): string {
@@ -59,10 +59,10 @@ export function fmtBytes(n: number): string {
 
 export function presenceColor(status: string): string {
   switch (status) {
-    case "online": return "bg-emerald-500";
-    case "away": return "bg-amber-500";
-    case "dnd": return "bg-rose-500";
-    default: return "bg-zinc-400 dark:bg-zinc-600";
+    case "online": return "bg-success";
+    case "away": return "bg-warning";
+    case "dnd": return "bg-error";
+    default: return "bg-ink-muted dark:bg-ink-muted";
   }
 }
 

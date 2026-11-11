@@ -50,7 +50,7 @@ export default function ResetPassword({ token }: { token: string }) {
 
         {done ? (
           <div className="rounded-xl border border-line bg-surface p-7 shadow-lg space-y-4 text-center animate-modal-in">
-            <CheckCircle2 className="h-10 w-10 text-emerald-500 mx-auto" />
+            <CheckCircle2 className="h-10 w-10 text-success mx-auto" />
             <h2 className="text-base font-bold text-ink font-display">Password Changed</h2>
             <p className="text-sm text-ink-muted">
               Your password has been changed. Any previous signed-in sessions were signed out for safety.

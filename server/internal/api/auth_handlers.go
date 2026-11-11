@@ -40,12 +40,43 @@ func (a *API) handleLogin(w http.ResponseWriter, r *http.Request) {
 	// Reserve counts the attempt immediately, before the slow password
 	// verification below, so a burst of concurrent requests can't all pass
 	// the check before any of them gets counted.
-	if !a.ipLimiter.Reserve(ip) || !a.limiter.Reserve(key) {
+	//
+	// The IP reservation is refunded on every outcome except a genuine
+	// failed attempt (wrong password or wrong TOTP code). On a LAN or VPN
+	// everyone behind one gateway shares the per-IP budget, so without the
+	// refunds one user's stale client retrying an old password would lock
+	// every colleague out of login; the per-username key still bounds
+	// guessing against any single account.
+	ipReserved := a.ipLimiter.Reserve(ip)
+	userReserved := ipReserved && a.limiter.Reserve(key)
+	if !ipReserved || !userReserved {
+		if ipReserved && !userReserved {
+			// The per-username limiter rejected the attempt but the IP
+			// reservation above was already counted; give it back so an
+			// attacker hammering one account can't exhaust the IP budget
+			// shared with everyone else on their network.
+			a.ipLimiter.Refund(ip)
+		}
 		writeErr(w, http.StatusTooManyRequests, "too many failed attempts; try again in a few minutes")
 		return
 	}
+	// refundIP releases the shared per-IP reservation. It is a no-op after
+	// the first call, and the deferred call is a safety net for any early
+	// return added later without one: better to under-count an attack than
+	// to lock out a shared network by accident. Paths that must keep the
+	// charge (wrong password, wrong TOTP) set keepIPCharge first.
+	keepIPCharge := true
+	refundIP := func() {
+		if keepIPCharge {
+			keepIPCharge = false
+			a.ipLimiter.Refund(ip)
+		}
+	}
+	defer refundIP()
+
 	user, err := a.db.GetUserByUsername(req.Username)
 	if err != nil {
+		refundIP()
 		// Spend the same argon2 cost as a real verification so this path
 		// isn't distinguishable by timing from a wrong-password failure below.
 		auth.VerifyDummyPassword(req.Password)
@@ -55,11 +86,15 @@ func (a *API) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	ok, err := auth.VerifyPassword(user.PasswordHash, req.Password)
 	if err != nil || !ok {
+		// A genuine failed attempt: keep the IP charge so a password spray
+		// from one address still hits the per-IP cap.
+		keepIPCharge = false
 		a.auditAnon(r, req.Username, "login_failed", "bad password")
 		writeErr(w, http.StatusUnauthorized, "invalid username or password")
 		return
 	}
 	if user.Disabled {
+		refundIP()
 		a.auditAnon(r, req.Username, "login_failed", "account disabled")
 		writeErr(w, http.StatusForbidden, "This account is suspended. Please contact your administrator.")
 		return
@@ -69,11 +104,14 @@ func (a *API) handleLogin(w http.ResponseWriter, r *http.Request) {
 	// limiter (Reserve above), so they can't be brute-forced.
 	if user.TOTPSecret != "" {
 		if req.TOTPCode == "" {
+			refundIP()
 			writeErr(w, http.StatusUnauthorized, "two-factor code required")
 			return
 		}
 		step, ok := auth.VerifyTOTPStep(user.TOTPSecret, req.TOTPCode, time.Now())
 		if !ok || !a.acceptTOTPStep(user.ID, step) {
+			// A genuine failed attempt: keep the IP charge.
+			keepIPCharge = false
 			a.auditAnon(r, req.Username, "login_failed", "bad two-factor code")
 			writeErr(w, http.StatusUnauthorized, "invalid two-factor code")
 			return
@@ -81,6 +119,7 @@ func (a *API) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	a.limiter.Success(key)
 	a.ipLimiter.Refund(ip)
+	keepIPCharge = false
 
 	if err := a.startSession(w, r, user); err != nil {
 		writeErr(w, http.StatusInternalServerError, "could not create session")

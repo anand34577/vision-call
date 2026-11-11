@@ -30,6 +30,10 @@ type Config struct {
 	HTTPAddr               string
 	HTTPSRedirect          bool   // true: HTTPAddr only 301s to HTTPS; false: it also serves the app
 	DisableTLS             bool   // force plain HTTP only — no self-signed cert, no HTTPAddr companion port
+	// TrustPlainHTTPApp serves the full app (not just health/metrics/cert)
+	// on the plain-HTTP companion port. Off by default: a session token
+	// sent over plaintext can be captured by anyone on the network.
+	TrustPlainHTTPApp      bool
 	TLSCert                string // path to cert file; TLS enabled when both cert+key set
 	TLSKey                 string
 	DataDir                string // sqlite db + uploaded files live under here
@@ -198,6 +202,7 @@ func Load() *Config {
 		HTTPAddr:              env("HTTP_ADDR", env("HTTP_REDIRECT_ADDR", ":8080")),
 		HTTPSRedirect:         envBool("HTTPS_REDIRECT", false),
 		DisableTLS:            disableTLS,
+		TrustPlainHTTPApp:     envBool("TRUST_PLAIN_HTTP_APP", false),
 		TLSCert:               env("TLS_CERT", ""),
 		TLSKey:                env("TLS_KEY", ""),
 		DataDir:               env("DATA_DIR", "./data"),
@@ -305,6 +310,9 @@ func (c *Config) Validate(log *slog.Logger) {
 		log.Info("TLS_CERT configured", "https_addr", c.ListenAddr, "http_addr", c.HTTPAddr)
 	}
 
+	if c.TrustPlainHTTPApp && !c.DisableTLS {
+		log.Warn("TRUST_PLAIN_HTTP_APP=true — the plain-HTTP companion port serves the full app, so session tokens can travel in cleartext; only use this on a network you control end to end", "http_addr", c.HTTPAddr)
+	}
 	if !c.TrustProxy && !c.DisableTLS && c.ListenAddr == c.HTTPAddr {
 		log.Error("LISTEN_ADDR and HTTP_ADDR must differ when TLS is active (both would try to bind the same port)", "addr", c.ListenAddr)
 		os.Exit(1)

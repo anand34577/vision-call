@@ -68,7 +68,7 @@ function Devices() {
             <li key={s.id} className="flex items-center gap-3 px-3 py-2.5">
               {/okhttp|Android|iPhone/i.test(s.user_agent) ? <Smartphone className="h-4 w-4 text-ink-muted" /> : <Laptop className="h-4 w-4 text-ink-muted" />}
               <div className="min-w-0 flex-1">
-                <p className="text-sm font-medium truncate">{deviceLabel(s.user_agent)}{s.current && <span className="ml-2 text-[10px] font-bold uppercase text-emerald-600">This device</span>}</p>
+                <p className="text-sm font-medium truncate">{deviceLabel(s.user_agent)}{s.current && <span className="ml-2 text-[10px] font-bold uppercase text-success">This device</span>}</p>
                 <p className="text-xs text-ink-muted truncate">{s.ip || "unknown IP"} · last active {new Date(s.last_seen || s.created_at).toLocaleString()}</p>
               </div>
               {!s.current && <button onClick={() => void revoke(s.id)} className={btnGhost}>Sign out</button>}

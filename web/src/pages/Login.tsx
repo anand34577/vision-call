@@ -115,7 +115,7 @@ export default function Login() {
         <div className="text-center mb-8">
           <div className="relative inline-flex h-14 w-14 items-center justify-center rounded-2xl bg-brand shadow-lg shadow-brand/40 ring-1 ring-black/10 dark:ring-white/20 mb-4">
             <span className="font-display font-bold text-2xl text-white">V</span>
-            <span className="absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5 rounded-full bg-emerald-500 ring-2 ring-surface" aria-hidden="true" />
+            <span className="absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5 rounded-full bg-success ring-2 ring-surface" aria-hidden="true" />
           </div>
           <h1 className="text-2xl font-bold font-display tracking-tight text-ink">
             Vision Call
@@ -181,7 +181,7 @@ export default function Login() {
                   {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </button>
               </div>
-              {capsOn && <p className="text-xs text-amber-500 mt-1.5" role="status">Caps Lock is on</p>}
+              {capsOn && <p className="text-xs text-warning mt-1.5" role="status">Caps Lock is on</p>}
             </div>
             {needTotp && (
               <div>

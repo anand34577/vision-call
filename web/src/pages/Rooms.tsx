@@ -17,11 +17,11 @@ function CopyButton({ text }: { text: string }) {
         setCopied(true);
         setTimeout(() => setCopied(false), 1500);
       }}
-      className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 transition"
+      className="text-ink-muted hover:text-ink-secondary dark:hover:text-ink-secondary transition"
       title="Copy"
       aria-label="Copy"
     >
-      {copied ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
+      {copied ? <Check className="h-3.5 w-3.5 text-success" /> : <Copy className="h-3.5 w-3.5" />}
     </button>
   );
 }
@@ -177,7 +177,7 @@ export default function Rooms() {
                 </div>
               </div>
               <div className="flex items-center gap-3 text-xs text-ink-muted font-medium">
-                {joinLookup.require_passcode && <span className="flex items-center gap-1.5"><Lock className="h-3.5 w-3.5 text-amber-400" /> Passcode required</span>}
+                {joinLookup.require_passcode && <span className="flex items-center gap-1.5"><Lock className="h-3.5 w-3.5 text-warning" /> Passcode required</span>}
                 {joinLookup.require_approval && <span className="flex items-center gap-1.5"><ShieldCheck className="h-3.5 w-3.5 text-brand" /> Host approval required</span>}
               </div>
               {joinLookup.require_passcode && (
@@ -218,7 +218,7 @@ export default function Rooms() {
                 <div className="flex items-center gap-2 text-xs text-ink-muted mt-0.5">
                   <span className="font-mono tracking-wider bg-surface-hover border border-line px-1.5 py-0.5 rounded text-[11px] text-ink">{room.id}</span>
                   <CopyButton text={room.id} />
-                  {room.require_passcode && <span title="Passcode required" className="text-amber-500"><Lock className="h-3 w-3" /></span>}
+                  {room.require_passcode && <span title="Passcode required" className="text-warning"><Lock className="h-3 w-3" /></span>}
                   {room.require_approval && <span title="Approval required" className="text-brand"><ShieldCheck className="h-3 w-3" /></span>}
                 </div>
                 {(room.scheduled_at || !room.is_owner) && (
@@ -233,7 +233,7 @@ export default function Rooms() {
               </button>
               {room.is_owner && <button
                 onClick={() => { setDeleteError(null); setDeleteTarget(room); }}
-                className="h-10 w-10 rounded-xl hover:bg-rose-50 dark:hover:bg-rose-950/40 text-zinc-500 hover:text-rose-600 dark:hover:text-rose-400 flex items-center justify-center shrink-0 transition cursor-pointer"
+                className="h-10 w-10 rounded-xl hover:bg-error/10 dark:hover:bg-error/10 text-ink-muted hover:text-error dark:hover:text-error flex items-center justify-center shrink-0 transition cursor-pointer"
                 title="Delete room"
                 aria-label={`Delete ${room.name}`}
               >
@@ -248,36 +248,36 @@ export default function Rooms() {
       <Modal open={showCreate} onClose={() => setShowCreate(false)} title="New Private Room">
         <form onSubmit={createRoom} className="space-y-4">
           <div>
-            <label htmlFor="room-name" className="block text-xs font-semibold text-zinc-500 mb-1">Room Name</label>
+            <label htmlFor="room-name" className="block text-xs font-semibold text-ink-muted mb-1">Room Name</label>
             <input id="room-name" className={inputCls} placeholder={`${me.display_name}'s room`} value={name} onChange={(e) => setName(e.target.value)} autoFocus />
           </div>
 
           <div>
-            <label htmlFor="room-when" className="block text-xs font-semibold text-zinc-500 mb-1">Schedule for later (optional)</label>
+            <label htmlFor="room-when" className="block text-xs font-semibold text-ink-muted mb-1">Schedule for later (optional)</label>
             <input id="room-when" type="datetime-local" className={inputCls} value={scheduledAt} min={new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16)} onChange={(e) => setScheduledAt(e.target.value)} />
-            <p className="text-xs text-zinc-400 mt-1">Invited people will see it in their Rooms list with the start time.</p>
+            <p className="text-xs text-ink-muted mt-1">Invited people will see it in their Rooms list with the start time.</p>
           </div>
 
           <div>
-            <label htmlFor="room-passcode" className="block text-xs font-semibold text-zinc-500 mb-1">Passcode (optional)</label>
+            <label htmlFor="room-passcode" className="block text-xs font-semibold text-ink-muted mb-1">Passcode (optional)</label>
             <input id="room-passcode" type="password" autoComplete="off" className={inputCls} placeholder="Leave blank for no passcode" value={passcode} onChange={(e) => setPasscode(e.target.value)} />
           </div>
 
           <div className="flex items-center justify-between py-1">
             <div>
               <p className="text-sm font-medium flex items-center gap-1.5"><ShieldCheck className="h-4 w-4" /> Require my approval</p>
-              <p className="text-xs text-zinc-400">You'll get a prompt to admit each person before they join.</p>
+              <p className="text-xs text-ink-muted">You'll get a prompt to admit each person before they join.</p>
             </div>
             <Switch checked={requireApproval} onChange={setRequireApproval} label="Require host approval" />
           </div>
 
           <div>
             <div className="flex items-center justify-between mb-1.5">
-              <label className="block text-xs font-semibold text-zinc-500 flex items-center gap-1"><Users className="h-3.5 w-3.5" /> Restrict to specific people ({invited.length})</label>
+              <label className="block text-xs font-semibold text-ink-muted flex items-center gap-1"><Users className="h-3.5 w-3.5" /> Restrict to specific people ({invited.length})</label>
             </div>
-            <p className="text-xs text-zinc-400 mb-1.5">Leave empty and anyone with the room code/passcode can try to join.</p>
+            <p className="text-xs text-ink-muted mb-1.5">Leave empty and anyone with the room code/passcode can try to join.</p>
             <div className="relative mb-2">
-              <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-zinc-400" />
+              <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-ink-muted" />
               <input
                 value={memberSearch}
                 onChange={(e) => setMemberSearch(e.target.value)}
@@ -285,23 +285,23 @@ export default function Rooms() {
                 className={`${inputCls} pl-8 py-1.5 text-xs`}
               />
             </div>
-            <div className="max-h-40 overflow-y-auto space-y-1 border border-zinc-200 dark:border-zinc-700 rounded-lg p-1.5">
+            <div className="max-h-40 overflow-y-auto space-y-1 border border-line rounded-lg p-1.5">
               {modalFilteredUsers.map((u) => (
-                <label key={u.id} className="flex items-center gap-3 rounded-md px-2 py-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer transition">
+                <label key={u.id} className="flex items-center gap-3 rounded-md px-2 py-1.5 hover:bg-surface-hover dark:hover:bg-elevated cursor-pointer transition">
                   <input
                     type="checkbox"
                     checked={invited.includes(u.id)}
                     onChange={(e) => setInvited((m) => (e.target.checked ? [...m, u.id] : m.filter((x) => x !== u.id)))}
-                    className="h-4 w-4 accent-blue-600 rounded"
+                    className="h-4 w-4 accent-brand rounded"
                   />
                   <Avatar name={u.display_name} id={u.id} fileId={u.avatar_file_id} size="sm" />
                   <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium text-zinc-900 dark:text-zinc-200 truncate">{u.display_name}</p>
-                    <p className="text-xs text-zinc-500 truncate">@{u.username}</p>
+                    <p className="text-sm font-medium text-ink truncate">{u.display_name}</p>
+                    <p className="text-xs text-ink-muted truncate">@{u.username}</p>
                   </div>
                 </label>
               ))}
-              {modalFilteredUsers.length === 0 && <p className="text-xs text-zinc-600 text-center py-4">No users found</p>}
+              {modalFilteredUsers.length === 0 && <p className="text-xs text-ink-secondary text-center py-4">No users found</p>}
             </div>
           </div>
 
@@ -317,8 +317,8 @@ export default function Rooms() {
       {/* Delete Room Confirmation */}
       <Modal open={!!deleteTarget} onClose={() => (deleteBusy ? null : setDeleteTarget(null))} title="Delete room?">
         <div className="space-y-4">
-          <p className="text-sm text-zinc-400">
-            This permanently deletes <span className="font-semibold text-zinc-900 dark:text-zinc-200">{deleteTarget?.name}</span> for everyone. This can't be undone.
+          <p className="text-sm text-ink-muted">
+            This permanently deletes <span className="font-semibold text-ink">{deleteTarget?.name}</span> for everyone. This can't be undone.
           </p>
           {deleteError && <Alert variant="error">{deleteError}</Alert>}
           <div className="flex justify-end gap-2">

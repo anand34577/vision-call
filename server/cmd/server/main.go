@@ -281,7 +281,15 @@ func main() {
 				allowedHosts := append([]string{defaultHost, "localhost", "127.0.0.1"}, extraHosts...)
 				companionSrv = startHTTPRedirect(cfg.HTTPAddr, cfg.ListenAddr, defaultHost, allowedHosts, lg)
 			} else {
-				companionSrv = startHTTPPlain(cfg.HTTPAddr, securityHeaders(r), lg)
+				// The plain-HTTP port serves only what must work without TLS:
+				// health checks, metrics scraping and the CA download that
+				// lets a device set up the HTTPS port in the first place. The
+				// app itself — above all /api/login and the session cookie — is
+				// HTTPS-only, because a session token sent in cleartext can be
+				// captured and replayed by anyone on the network. Set
+				// TRUST_PLAIN_HTTP_APP=true to restore the old behaviour on a
+				// network that is known-private.
+				companionSrv = startHTTPPlain(cfg.HTTPAddr, securityHeaders(companionOnlyHandler(r, cfg.ListenAddr, cfg.TrustPlainHTTPApp, lg)), lg)
 			}
 			companionMu.Unlock()
 
@@ -480,6 +488,51 @@ func startHTTPPlain(addr string, handler http.Handler, lg *slog.Logger) *http.Se
 		}
 	}()
 	return srv
+}
+
+// companionOnlyHandler restricts the plain-HTTP companion port to the
+// endpoints that are safe — or required — without TLS: /api/healthz,
+// /api/metrics and the CA certificate download. Everything else gets a
+// short explanation and a redirect hint, so a user who types the http://
+// address into a browser lands on the https:// one instead of logging in
+// over a connection that would expose their session token. When
+// trustPlainHTTPApp is true the full app is served unchanged (for a
+// network the operator has decided is private).
+func companionOnlyHandler(app http.Handler, httpsAddr string, trustPlainHTTPApp bool, lg *slog.Logger) http.Handler {
+	if trustPlainHTTPApp {
+		lg.Warn("plain-http companion serves the FULL app (TRUST_PLAIN_HTTP_APP=true); session cookies will not be marked Secure on this port",
+			"addr_hint", "only do this on a network you control end to end")
+		return app
+	}
+	_, httpsPort, _ := net.SplitHostPort(httpsAddr)
+	if httpsPort == "" {
+		httpsPort = "8443" // the documented default HTTPS port
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path := r.URL.Path
+		switch {
+		case path == "/api/healthz",
+			path == "/api/metrics",
+			path == "/api/cert",
+			path == "/cert.pem":
+			app.ServeHTTP(w, r)
+			return
+		case strings.HasPrefix(path, "/api/"):
+			w.Header().Set("Cache-Control", "no-store")
+			http.Error(w, "the app and its API are only served over HTTPS; open this server on its https:// port", http.StatusNotFound)
+		default:
+			// Browser navigation: send people to the HTTPS port rather than
+			// letting them sign in over plaintext. Same host, HTTPS port.
+			host := r.Host
+			if h, _, err := net.SplitHostPort(host); err == nil && h != "" {
+				host = h
+			}
+			if host == "" {
+				host = "localhost"
+			}
+			http.Redirect(w, r, "https://"+host+":"+httpsPort+path, http.StatusTemporaryRedirect)
+		}
+	})
 }
 
 func serveSPA(w http.ResponseWriter, r *http.Request, fsys fs.FS) {

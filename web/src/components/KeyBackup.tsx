@@ -49,8 +49,8 @@ function PasswordForm({
       {confirm && (
         <input type="password" className={inputCls} value={pw2} onChange={(e) => setPw2(e.target.value)} placeholder="Type it again" autoComplete="new-password" />
       )}
-      {tooShort && <p className="text-xs text-amber-500">Use at least 8 characters.</p>}
-      {mismatch && <p className="text-xs text-amber-500">The passwords don't match.</p>}
+      {tooShort && <p className="text-xs text-warning">Use at least 8 characters.</p>}
+      {mismatch && <p className="text-xs text-warning">The passwords don't match.</p>}
       {error && <Alert variant="error">{error}</Alert>}
       <div className="flex justify-end gap-2">
         <button type="button" onClick={onCancel} className={btnGhost} disabled={busy}>
@@ -104,7 +104,7 @@ export function KeyBackupSection() {
           </p>
         </div>
         {status?.exists && (
-          <span className="shrink-0 text-xs font-semibold text-emerald-500 flex items-center gap-1.5 bg-emerald-500/10 border border-emerald-500/30 px-3 py-1 rounded-full">
+          <span className="shrink-0 text-xs font-semibold text-success flex items-center gap-1.5 bg-success/10 border border-success/30 px-3 py-1 rounded-full">
             <ShieldCheck className="h-3.5 w-3.5" /> On
           </span>
         )}

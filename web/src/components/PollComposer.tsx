@@ -33,11 +33,11 @@ export default function PollComposer({
     <Modal open={open} onClose={onClose} title="Create a poll">
       <form onSubmit={submit} className="space-y-4">
         <div>
-          <label htmlFor="poll-question" className="block text-xs font-semibold text-zinc-500 mb-1">Question</label>
+          <label htmlFor="poll-question" className="block text-xs font-semibold text-ink-muted mb-1">Question</label>
           <input id="poll-question" className={inputCls} maxLength={300} value={question} onChange={(e) => setQuestion(e.target.value)} autoFocus placeholder="Where should we have lunch?" />
         </div>
         <div className="space-y-2">
-          <p className="text-xs font-semibold text-zinc-500">Options</p>
+          <p className="text-xs font-semibold text-ink-muted">Options</p>
           {options.map((o, i) => (
             <div key={i} className="flex items-center gap-2">
               <input
@@ -49,7 +49,7 @@ export default function PollComposer({
                 onChange={(e) => setOptions((list) => list.map((x, j) => (j === i ? e.target.value : x)))}
               />
               {options.length > 2 && (
-                <button type="button" className="h-9 w-9 shrink-0 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center justify-center text-zinc-500" aria-label={`Remove option ${i + 1}`} onClick={() => setOptions((list) => list.filter((_, j) => j !== i))}>
+                <button type="button" className="h-9 w-9 shrink-0 rounded-lg hover:bg-surface-hover dark:hover:bg-elevated flex items-center justify-center text-ink-muted" aria-label={`Remove option ${i + 1}`} onClick={() => setOptions((list) => list.filter((_, j) => j !== i))}>
                   <X className="h-4 w-4" />
                 </button>
               )}
@@ -65,7 +65,7 @@ export default function PollComposer({
           <p className="text-sm font-medium">Allow multiple answers</p>
           <Switch checked={multi} onChange={setMulti} label="Allow multiple answers" />
         </div>
-        <p className="text-xs text-zinc-400">Polls are visible to everyone in the chat, so they are not end-to-end encrypted.</p>
+        <p className="text-xs text-ink-muted">Polls are visible to everyone in the chat, so they are not end-to-end encrypted.</p>
         <button className={`${btnPrimary} w-full`} disabled={!valid}>Send poll</button>
       </form>
     </Modal>

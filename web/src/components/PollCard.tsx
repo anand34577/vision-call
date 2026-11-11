@@ -26,11 +26,11 @@ export function PollCard({ poll, meID, canClose, mine }: { poll: Poll; meID: num
                 aria-pressed={picked}
                 onClick={() => votePoll(poll.id, o.id)}
                 className={`relative w-full overflow-hidden rounded-lg border px-3 py-2 text-left text-sm transition disabled:cursor-default ${
-                  picked ? "border-current" : mine ? "border-white/30 hover:border-white/60" : "border-zinc-300 dark:border-zinc-600 hover:border-blue-500"
+                  picked ? "border-current" : mine ? "border-white/30 hover:border-white/60" : "border-line dark:border-line-strong hover:border-brand"
                 }`}
               >
                 <span
-                  className={`absolute inset-y-0 left-0 ${mine ? "bg-white/25" : "bg-blue-500/20"}`}
+                  className={`absolute inset-y-0 left-0 ${mine ? "bg-white/25" : "bg-brand/20"}`}
                   style={{ width: `${pct}%` }}
                   aria-hidden="true"
                 />

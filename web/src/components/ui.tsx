@@ -32,7 +32,7 @@ export function Avatar({
         key={fileId}
         src={`/api/files/${fileId}`}
         alt={name}
-        className={`${dim} rounded-full object-cover bg-zinc-200 dark:bg-zinc-800 ring-1 ring-black/5 dark:ring-white/5 shadow-xs shrink-0 ${className}`}
+        className={`${dim} rounded-full object-cover bg-surface-hover dark:bg-elevated ring-1 ring-black/5 dark:ring-white/5 shadow-xs shrink-0 ${className}`}
         onError={() => setImageFailed(true)}
       />
     );
@@ -49,12 +49,12 @@ export function Avatar({
 export function PresenceDot({ status, className = "" }: { status: string; className?: string }) {
   const color =
     status === "online"
-      ? "bg-emerald-500 shadow-sm shadow-emerald-500/50"
+      ? "bg-success shadow-sm shadow-success/50"
       : status === "away"
-        ? "bg-amber-400"
+        ? "bg-warning"
         : status === "dnd"
-          ? "bg-rose-500"
-          : "bg-zinc-400 dark:bg-zinc-600";
+          ? "bg-error"
+          : "bg-ink-muted dark:bg-ink-muted";
   return (
     <span
       className={`relative inline-block h-2.5 w-2.5 rounded-full ring-2 ring-white dark:ring-[#0A0E1A] ${status === "online" ? "ring-pulse" : ""} ${color} ${className}`}
@@ -191,8 +191,8 @@ export function Switch({
       aria-label={label}
       disabled={disabled}
       onClick={() => onChange(!checked)}
-      className={`relative inline-flex h-5.5 w-10 shrink-0 items-center rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-900 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer ${
-        checked ? "bg-blue-600" : "bg-zinc-700"
+      className={`relative inline-flex h-5.5 w-10 shrink-0 items-center rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-900 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer ${
+        checked ? "bg-brand" : "bg-surface-hover"
       }`}
     >
       <span
@@ -217,24 +217,24 @@ export const btnSecondary =
   "inline-flex items-center justify-center gap-2 rounded-lg border border-line bg-surface px-4 py-2 text-sm font-medium text-ink shadow-xs hover:bg-surface-hover hover:border-line-strong active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none transition-all duration-150 cursor-pointer";
 
 export const btnDestructive =
-  "inline-flex items-center justify-center gap-2 rounded-lg bg-rose-600 hover:bg-rose-500 px-4 py-2 text-sm font-semibold text-white shadow-md shadow-rose-600/20 active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none transition-all duration-150 cursor-pointer";
+  "inline-flex items-center justify-center gap-2 rounded-lg bg-error hover:bg-error px-4 py-2 text-sm font-semibold text-white shadow-md shadow-error/20 active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none transition-all duration-150 cursor-pointer";
 
 // Alert shared banner
 const alertStyles = {
   success: {
-    wrap: "text-emerald-300 bg-emerald-950/50 border-emerald-800/60",
+    wrap: "text-success bg-success/10 border-success/10",
     Icon: CheckCircle2,
   },
   error: {
-    wrap: "text-rose-300 bg-rose-950/50 border-rose-800/60",
+    wrap: "text-error bg-error/10 border-error/10",
     Icon: XCircle,
   },
   warning: {
-    wrap: "text-amber-300 bg-amber-950/50 border-amber-800/60",
+    wrap: "text-warning bg-warning/10 border-warning/10",
     Icon: AlertTriangle,
   },
   info: {
-    wrap: "text-blue-300 bg-blue-950/50 border-blue-800/60",
+    wrap: "text-brand bg-brand/10 border-brand/10",
     Icon: Info,
   },
 } as const;
@@ -272,9 +272,9 @@ export function Badge({
     accent: "bg-brand/15 text-brand border border-brand/30",
     // prismatic kept as alias for primary
     prismatic: "bg-brand/15 text-brand border border-brand/30",
-    success: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/30",
-    warning: "bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/30",
-    destructive: "bg-rose-500/15 text-rose-700 dark:text-rose-300 border-rose-500/30",
+    success: "bg-success/15 text-success border-success/30",
+    warning: "bg-warning/15 text-warning border-warning/30",
+    destructive: "bg-error/15 text-error border-error/30",
     neutral: "bg-surface-hover text-ink-secondary border-line",
   }[variant];
 
@@ -319,13 +319,13 @@ export function SectionHeader({
     <div className="flex items-start justify-between gap-3">
       <div className="flex items-center gap-2.5 min-w-0">
         {icon && (
-          <span className="h-8 w-8 rounded-lg bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
+          <span className="h-8 w-8 rounded-lg bg-brand/10 text-brand flex items-center justify-center shrink-0">
             {icon}
           </span>
         )}
         <div className="min-w-0">
-          <h2 className="font-semibold text-sm text-zinc-900 dark:text-zinc-100 truncate">{title}</h2>
-          {hint && <p className="text-xs text-zinc-500 mt-0.5">{hint}</p>}
+          <h2 className="font-semibold text-sm text-ink truncate">{title}</h2>
+          {hint && <p className="text-xs text-ink-muted mt-0.5">{hint}</p>}
         </div>
       </div>
       {action}
@@ -349,13 +349,13 @@ export function Field({
 }) {
   return (
     <div>
-      <label htmlFor={htmlFor} className="block text-xs font-semibold text-zinc-600 dark:text-zinc-400 mb-1.5">
+      <label htmlFor={htmlFor} className="block text-xs font-semibold text-ink-secondary-muted mb-1.5">
         {label}
       </label>
       {children}
-      {hint && !error && <p className="text-xs text-zinc-500 mt-1">{hint}</p>}
+      {hint && !error && <p className="text-xs text-ink-muted mt-1">{hint}</p>}
       {error && (
-        <p className="text-xs text-rose-600 dark:text-rose-400 mt-1" role="alert">
+        <p className="text-xs text-error mt-1" role="alert">
           {error}
         </p>
       )}
@@ -390,8 +390,8 @@ export function IconBtn({
       aria-pressed={active}
       className={`h-10 w-10 rounded-xl flex items-center justify-center shrink-0 transition border cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
         active
-          ? "bg-blue-600 text-white border-blue-600 shadow-md shadow-blue-600/25"
-          : "text-zinc-500 dark:text-zinc-400 border-transparent hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:hover:text-zinc-100 hover:border-zinc-200 dark:hover:border-zinc-700"
+          ? "bg-brand text-white border-brand shadow-md shadow-brand/25"
+          : "text-ink-muted dark:text-ink-muted border-transparent hover:bg-surface-hover dark:hover:bg-elevated hover:text-ink dark:hover:text-ink hover:border-line dark:hover:border-line"
       } ${className}`}
     >
       {children}
@@ -429,11 +429,11 @@ export function EmptyState({
 }) {
   return (
     <div className="ambient-glow p-8 text-center flex flex-col items-center gap-2.5">
-      <div className="h-12 w-12 rounded-2xl bg-white dark:bg-white/[0.06] border border-zinc-200 dark:border-white/10 shadow-sm flex items-center justify-center text-blue-600 dark:text-blue-400">
+      <div className="h-12 w-12 rounded-2xl bg-white dark:bg-white/[0.06] border border-line dark:border-white/10 shadow-sm flex items-center justify-center text-brand">
         {icon}
       </div>
-      <p className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">{title}</p>
-      {hint && <p className="text-xs text-zinc-500 max-w-xs">{hint}</p>}
+      <p className="text-sm font-semibold text-ink-secondary-secondary">{title}</p>
+      {hint && <p className="text-xs text-ink-muted max-w-xs">{hint}</p>}
       {action && <div className="pt-1">{action}</div>}
     </div>
   );
@@ -446,7 +446,7 @@ const buttonVariants = {
   secondary:
     "border border-line bg-surface text-ink shadow-xs hover:bg-surface-hover hover:border-line-strong",
   ghost: "text-ink-secondary hover:text-ink hover:bg-surface-hover",
-  destructive: "bg-rose-600 hover:bg-rose-500 text-white shadow-md shadow-rose-600/20",
+  destructive: "bg-error hover:bg-error text-white shadow-md shadow-error/20",
 } as const;
 
 const buttonSizes = {
@@ -672,9 +672,9 @@ export function Skeleton({ className = "" }: { className?: string }) {
 // app root; raise toasts anywhere with `toast.success("...")` from
 // store/toast, or the useToast() hook inside components.
 const toastStyles = {
-  success: { wrap: "border-emerald-500/30", icon: "text-emerald-400", bar: "bg-emerald-400", Icon: CheckCircle2 },
-  error: { wrap: "border-rose-500/30", icon: "text-rose-400", bar: "bg-rose-400", Icon: XCircle },
-  info: { wrap: "border-sky-500/30", icon: "text-sky-400", bar: "bg-sky-400", Icon: Info },
+  success: { wrap: "border-success/30", icon: "text-success", bar: "bg-success", Icon: CheckCircle2 },
+  error: { wrap: "border-error/30", icon: "text-error", bar: "bg-error", Icon: XCircle },
+  info: { wrap: "border-info/30", icon: "text-info", bar: "bg-info", Icon: Info },
   message: { wrap: "border-brand/40", icon: "text-brand", bar: "bg-brand", Icon: MessageCircle },
 } as const;
 
@@ -699,15 +699,15 @@ export function ToastHost() {
               dismiss(t.id);
             }}
             className={cx(
-              "pointer-events-auto relative overflow-hidden flex items-start gap-3 w-full sm:w-80 rounded-xl border bg-zinc-900/95 text-zinc-100 px-3.5 py-3 text-sm shadow-2xl backdrop-blur animate-toast-in",
+              "pointer-events-auto relative overflow-hidden flex items-start gap-3 w-full sm:w-80 rounded-xl border bg-elevated/95 text-ink px-3.5 py-3 text-sm shadow-2xl backdrop-blur animate-toast-in",
               wrap,
-              clickable && "cursor-pointer hover:bg-zinc-800/95",
+              clickable && "cursor-pointer hover:bg-elevated/95",
             )}
           >
             <Icon className={cx("h-4 w-4 shrink-0 mt-0.5", icon)} />
             <div className="flex-1 min-w-0">
               {t.title && <p className="font-semibold leading-snug truncate">{t.title}</p>}
-              <p className={cx("leading-snug", t.title ? "text-zinc-300 line-clamp-2" : "")}>{t.message}</p>
+              <p className={cx("leading-snug", t.title ? "text-ink-secondary line-clamp-2" : "")}>{t.message}</p>
             </div>
             <button
               type="button"
