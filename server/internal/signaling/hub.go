@@ -21,8 +21,9 @@ import (
 
 // Envelope is the single WS message shape in both directions.
 type Envelope struct {
-	Type string          `json:"type"`
-	Data json.RawMessage `json:"data,omitempty"`
+	Type     string          `json:"type"`
+	Data     json.RawMessage `json:"data,omitempty"`
+	ClientID string          `json:"client_id,omitempty"`
 }
 
 type Hub struct {

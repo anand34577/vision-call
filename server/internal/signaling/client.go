@@ -1,10 +1,11 @@
 package signaling
 
 import (
-	"errors"
 	"encoding/json"
-	"strings"
+	"errors"
+	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -145,6 +146,21 @@ func (c *Client) close() {
 	})
 }
 
+// writeCloseWithReason sends one final data frame followed by a close
+// frame, both synchronously on the connection with a write deadline. Used
+// where the read loop is about to return and the deferred c.close() would
+// otherwise win the race against writePump's queued frames.
+func (c *Client) writeCloseWithReason(data []byte, closeCode int, reason string) error {
+	_ = c.conn.SetWriteDeadline(time.Now().Add(writeWait))
+	if err := c.conn.WriteMessage(websocket.TextMessage, data); err != nil {
+		return err
+	}
+	_ = c.conn.SetWriteDeadline(time.Now().Add(writeWait))
+	return c.conn.WriteControl(websocket.CloseMessage,
+		websocket.FormatCloseMessage(closeCode, reason),
+		time.Now().Add(writeWait))
+}
+
 // Kick tells the client it has been signed out, then closes the socket.
 func (c *Client) Kick(reason string) {
 	c.Finish("force:logout", map[string]string{"reason": reason})
@@ -220,6 +236,23 @@ func (c *Client) readPump() {
 	for {
 		_, data, err := c.conn.ReadMessage()
 		if err != nil {
+			// An oversized frame trips the read limit before it ever
+			// reaches the loop: tell the client why, then close with 1009
+			// (Message Too Big) so it does not mistake this for a network
+			// drop and reconnect into the same failure. Both frames are
+			// written synchronously on the connection — queueing through
+			// c.Send would race the deferred c.close() below, which tears
+			// the socket down before writePump can flush the queued error.
+			// gorilla signals an over-limit frame by returning
+			// websocket.ErrReadLimit from ReadMessage — a plain error, not a
+			// close error — so match on it (or on the 1009 close the peer may
+			// have sent) rather than on CloseMessageTooBig alone.
+			if errors.Is(err, websocket.ErrReadLimit) || websocket.IsCloseError(err, websocket.CloseMessageTooBig) {
+				_ = c.writeCloseWithReason(
+					[]byte(fmt.Sprintf(`{"type":"error","data":{"code":"message-too-large","message":"message exceeds the %d KB limit"}}`, maxMsgSize/1024)),
+					websocket.CloseMessageTooBig, "message too large",
+				)
+			}
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseNormalClosure) {
 				c.log.Debug("ws: read error", "err", err)
 			}
@@ -243,7 +276,7 @@ func (c *Client) readPump() {
 		}
 		if !limiter.Allow(max) {
 			c.log.Warn("ws: rate limit exceeded; dropping message", "type", env.Type)
-			c.Send("error", map[string]string{"code": "rate-limit", "message": "sending too fast; slow down"})
+			c.Send("error", map[string]string{"code": "rate-limit", "message": "sending too fast; slow down", "client_id": env.ClientID})
 			continue
 		}
 		c.route(&env)
