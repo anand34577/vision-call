@@ -15,8 +15,13 @@ services:
     restart: unless-stopped
     ports:
       - "8443:8443"      # HTTPS web app
-      - "8080:8080"      # plain HTTP (Android app, health checks)
       - "7882:7882/udp"  # group-call audio and video
+      # Plain-HTTP port 8080 is not published to the network by default:
+      # it only serves health checks, metrics and the CA certificate
+      # download (the Docker healthcheck reaches it inside the container).
+      # To expose it anyway — e.g. for the Android app over plain HTTP on
+      # a trusted network — uncomment the next line:
+      # - "8080:8080"
     env_file:
       - path: .env
         required: false
