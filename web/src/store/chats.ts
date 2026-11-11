@@ -316,15 +316,20 @@ export const useChats = create<ChatsState>((set, get) => ({
 
   // Kicks off async decryption for any encrypted messages not already
   // cached, so the UI can render a placeholder then swap in plaintext a moment
-  // later without blocking the message list on crypto work.
+  // later without blocking the message list on crypto work. All results land
+  // in a single store update per tick, so a 50-message history decrypts with
+  // one re-render pass instead of fifty.
   decryptPending: (msgs) => {
     const cache = get().decryptedContent;
-    for (const m of msgs) {
-      if (!m.is_encrypted || m.id in cache) continue;
-      decryptMessageContent(m).then((plain) => {
-        set((s) => ({ decryptedContent: { ...s.decryptedContent, [m.id]: plain } }));
+    const pending = msgs.filter((m) => m.is_encrypted && !(m.id in cache));
+    if (pending.length === 0) return;
+    Promise.all(pending.map(async (m) => [m.id, await decryptMessageContent(m)] as const)).then((results) => {
+      set((s) => {
+        const next = { ...s.decryptedContent };
+        for (const [id, plain] of results) next[id] = plain;
+        return { decryptedContent: next };
       });
-    }
+    });
   },
 
   setEncrypted: (c, on) => {

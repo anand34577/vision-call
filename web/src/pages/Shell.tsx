@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import {
   MessageSquare,
   Users,
@@ -15,6 +15,7 @@ import {
   X,
   Palette,
   Bell,
+  Loader2,
 } from "lucide-react";
 import { useAuth } from "../store/auth";
 import { useChats } from "../store/chats";
@@ -26,12 +27,12 @@ import { KeyBackupRestorePrompt } from "../components/KeyBackup";
 import { QuickSwitcher } from "../components/QuickSwitcher";
 import { Avatar, PresenceDot, Menu, MenuItem } from "../components/ui";
 import { THEMES, savePreferencesToDb, type ThemeId } from "../lib/theme";
-import Chats from "./Chats";
-import Directory from "./Directory";
-import CallsHistory from "./CallsHistory";
-import Rooms from "./Rooms";
-import Admin from "./Admin";
-import Settings from "./Settings";
+const Chats = lazy(() => import("./Chats"));
+const Directory = lazy(() => import("./Directory"));
+const CallsHistory = lazy(() => import("./CallsHistory"));
+const Rooms = lazy(() => import("./Rooms"));
+const Admin = lazy(() => import("./Admin"));
+const Settings = lazy(() => import("./Settings"));
 
 type View = "chats" | "directory" | "calls" | "rooms" | "admin" | "settings";
 
@@ -225,12 +226,12 @@ export default function Shell() {
         </div>
       )}
       {!connected && !replaced && (
-        <div className="bg-amber-950/80 border-b border-amber-800/50 text-amber-200 text-xs px-4 py-2 flex items-center justify-center gap-2 font-medium shrink-0 z-50">
+        <div className="bg-warning/10 border-b border-warning/10 text-warning text-xs px-4 py-2 flex items-center justify-center gap-2 font-medium shrink-0 z-50">
           <WifiOff className="h-3.5 w-3.5 animate-pulse" />
           <span>Realtime connection lost. Reconnecting…</span>
           <button
             onClick={() => ws.connect()}
-            className="ml-2 font-semibold text-amber-300 hover:text-amber-100 underline underline-offset-2 flex items-center gap-1.5 transition cursor-pointer"
+            className="ml-2 font-semibold text-warning hover:text-warning underline underline-offset-2 flex items-center gap-1.5 transition cursor-pointer"
           >
             <RefreshCw className="h-3 w-3" /> Retry Now
           </button>
@@ -394,7 +395,7 @@ export default function Shell() {
             {/* Sign out */}
             <button
               onClick={() => void logout()}
-              className="w-full flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 hover:text-rose-700 dark:hover:text-rose-300 transition cursor-pointer"
+              className="w-full flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm text-error hover:bg-error/10 dark:hover:bg-error/10 hover:text-error dark:hover:text-error transition cursor-pointer"
             >
               <LogOut className="h-5 w-5 shrink-0" />
               <span className="hidden lg:block text-sm font-medium">Sign out</span>
@@ -404,12 +405,20 @@ export default function Shell() {
 
         {/* Main content */}
         <main key={view} className="animate-view-in flex-1 min-w-0 flex flex-col pb-16 md:pb-0 app-shell">
-          {view === "chats" && <Chats />}
-          {view === "directory" && <Directory />}
-          {view === "calls" && <CallsHistory />}
-          {view === "rooms" && <Rooms />}
-          {view === "admin" && me.role === "admin" && <Admin />}
-          {view === "settings" && <Settings />}
+          <Suspense
+            fallback={
+              <div className="flex-1 flex items-center justify-center">
+                <Loader2 className="h-6 w-6 animate-spin text-ink-muted" aria-label="Loading" />
+              </div>
+            }
+          >
+            {view === "chats" && <Chats />}
+            {view === "directory" && <Directory />}
+            {view === "calls" && <CallsHistory />}
+            {view === "rooms" && <Rooms />}
+            {view === "admin" && me.role === "admin" && <Admin />}
+            {view === "settings" && <Settings />}
+          </Suspense>
         </main>
 
         {/* Mobile bottom nav — 4 primary tabs + More sheet */}
@@ -505,7 +514,7 @@ export default function Shell() {
                 </button>
                 <button
                   onClick={() => void logout()}
-                  className="w-full flex items-center gap-3 rounded-xl px-4 py-3.5 text-sm font-medium text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition cursor-pointer"
+                  className="w-full flex items-center gap-3 rounded-xl px-4 py-3.5 text-sm font-medium text-error hover:bg-error/10 dark:hover:bg-error/10 transition cursor-pointer"
                 >
                   <LogOut className="h-5 w-5" />
                   Sign out
