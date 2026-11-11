@@ -84,20 +84,20 @@ function SettingRow({ s, onSaved }: { s: SettingView; onSaved: () => void }) {
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 flex-wrap">
             <p className="text-sm font-medium">{s.label}</p>
-            <span className={`text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded-full ${s.source === "db" ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300" : s.source === "env" ? "bg-zinc-100 text-zinc-500 dark:bg-zinc-800 text-zinc-400" : "bg-zinc-100 text-zinc-400 dark:bg-zinc-800 text-zinc-500"}`}>
+            <span className={`text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded-full ${s.source === "db" ? "bg-success/10 text-success dark:bg-success/10" : s.source === "env" ? "bg-surface-hover text-ink-muted dark:bg-elevated text-ink-muted" : "bg-surface-hover text-ink-muted dark:bg-elevated text-ink-muted"}`}>
               {SOURCE_LABEL[s.source]}
             </span>
             {!s.editable && (
-              <span title={lockTitle} className="text-zinc-400">
+              <span title={lockTitle} className="text-ink-muted">
                 <Lock className="h-3 w-3" />
               </span>
             )}
           </div>
-          {s.description && <p className="text-xs text-zinc-400 mt-0.5">{s.description}</p>}
-          {error && <p className="text-xs text-rose-500 mt-1">{error}</p>}
+          {s.description && <p className="text-xs text-ink-muted mt-0.5">{s.description}</p>}
+          {error && <p className="text-xs text-error mt-1">{error}</p>}
         </div>
         <div className="flex items-center gap-2 shrink-0">
-          {busy && <Loader2 className="h-3.5 w-3.5 animate-spin text-zinc-400" />}
+          {busy && <Loader2 className="h-3.5 w-3.5 animate-spin text-ink-muted" />}
           <Switch checked={on} disabled={!s.editable || busy} onChange={(next) => void save(String(next))} label={s.label} />
         </div>
       </div>
@@ -110,19 +110,19 @@ function SettingRow({ s, onSaved }: { s: SettingView; onSaved: () => void }) {
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 flex-wrap">
             <p className="text-sm font-medium">{s.label}</p>
-            <span className={`text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded-full ${s.source === "db" ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300" : s.source === "env" ? "bg-zinc-100 text-zinc-500 dark:bg-zinc-800 text-zinc-400" : "bg-zinc-100 text-zinc-400 dark:bg-zinc-800 text-zinc-500"}`}>
+            <span className={`text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded-full ${s.source === "db" ? "bg-success/10 text-success dark:bg-success/10" : s.source === "env" ? "bg-surface-hover text-ink-muted dark:bg-elevated text-ink-muted" : "bg-surface-hover text-ink-muted dark:bg-elevated text-ink-muted"}`}>
               {SOURCE_LABEL[s.source]}
             </span>
             {!s.editable && (
-              <span title={lockTitle} className="text-zinc-400">
+              <span title={lockTitle} className="text-ink-muted">
                 <Lock className="h-3 w-3" />
               </span>
             )}
           </div>
-          {s.description && <p className="text-xs text-zinc-400 mt-0.5">{s.description}</p>}
+          {s.description && <p className="text-xs text-ink-muted mt-0.5">{s.description}</p>}
           {!editing && (
-            <p className="text-sm font-mono mt-1 text-zinc-600 dark:text-zinc-300 break-all">
-              {s.value === "" ? <span className="italic text-zinc-400">empty</span> : s.value}
+            <p className="text-sm font-mono mt-1 text-ink-secondary-secondary break-all">
+              {s.value === "" ? <span className="italic text-ink-muted">empty</span> : s.value}
             </p>
           )}
           {editing && (
@@ -136,23 +136,23 @@ function SettingRow({ s, onSaved }: { s: SettingView; onSaved: () => void }) {
                 placeholder={s.kind === "secret" ? "New value (leave blank to cancel)" : undefined}
                 onKeyDown={(e) => e.key === "Enter" && void save()}
               />
-              <button onClick={() => void save()} disabled={busy} className="text-xs font-medium px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white flex items-center gap-1.5 disabled:opacity-50">
+              <button onClick={() => void save()} disabled={busy} className="text-xs font-medium px-3 py-1.5 rounded-lg bg-brand hover:bg-brand text-white flex items-center gap-1.5 disabled:opacity-50">
                 {busy && <Loader2 className="h-3.5 w-3.5 animate-spin" />} Save
               </button>
-              <button onClick={() => setEditing(false)} disabled={busy} className="text-xs font-medium px-3 py-1.5 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-50">
+              <button onClick={() => setEditing(false)} disabled={busy} className="text-xs font-medium px-3 py-1.5 rounded-lg hover:bg-surface-hover dark:hover:bg-elevated disabled:opacity-50">
                 Cancel
               </button>
             </div>
           )}
-          {error && <p className="text-xs text-rose-500 mt-1">{error}</p>}
+          {error && <p className="text-xs text-error mt-1">{error}</p>}
         </div>
         {s.editable && !editing && (
           <div className="flex items-center gap-1 shrink-0">
-            <button onClick={startEdit} className="text-xs px-2.5 py-1.5 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 font-medium">
+            <button onClick={startEdit} className="text-xs px-2.5 py-1.5 rounded-lg hover:bg-surface-hover dark:hover:bg-elevated font-medium">
               Edit
             </button>
             {s.source === "db" && (
-              <button onClick={() => void reset()} disabled={busy} title="Reset to default" aria-label="Reset to default" className="h-7 w-7 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center justify-center text-zinc-400 disabled:opacity-50">
+              <button onClick={() => void reset()} disabled={busy} title="Reset to default" aria-label="Reset to default" className="h-7 w-7 rounded-lg hover:bg-surface-hover dark:hover:bg-elevated flex items-center justify-center text-ink-muted disabled:opacity-50">
                 <RotateCcw className="h-3.5 w-3.5" />
               </button>
             )}
@@ -192,19 +192,19 @@ function ServerSettings() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <SettingsIcon className="h-4 w-4 text-zinc-400" />
+          <SettingsIcon className="h-4 w-4 text-ink-muted" />
           <h2 className="font-semibold text-base">Server Settings</h2>
         </div>
         <button onClick={() => load(true)} className={btnGhost}>
           <RefreshCw className="h-4 w-4" /> Refresh
         </button>
       </div>
-      <p className="text-xs text-zinc-400">
+      <p className="text-xs text-ink-muted">
         Priority: environment variable / Docker <code>environment:</code> &gt; <code>.env</code> file &gt; set here &gt; default.
         Settings marked <Lock className="h-3 w-3 inline" /> are pinned by the environment/.env and can only be changed there, then a restart.
       </p>
       {loading ? (
-        <p className="p-6 text-center text-xs text-zinc-400 flex items-center justify-center gap-1.5">
+        <p className="p-6 text-center text-xs text-ink-muted flex items-center justify-center gap-1.5">
           <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading…
         </p>
       ) : (
@@ -436,10 +436,10 @@ function PasswordField({
 
 function StatusPill({ u }: { u: User }) {
   if (u.deleted) {
-    return <span className="text-[11px] font-semibold rounded-full px-2 py-0.5 bg-zinc-500/15 text-ink-muted">Deleted</span>;
+    return <span className="text-[11px] font-semibold rounded-full px-2 py-0.5 bg-ink-muted/15 text-ink-muted">Deleted</span>;
   }
   if (u.disabled) {
-    return <span className="text-[11px] font-semibold rounded-full px-2 py-0.5 bg-amber-500/15 text-amber-500">Suspended</span>;
+    return <span className="text-[11px] font-semibold rounded-full px-2 py-0.5 bg-warning/15 text-warning">Suspended</span>;
   }
   return (
     <span className="flex items-center gap-1.5 text-xs text-ink-muted">
@@ -461,9 +461,9 @@ function RowAction({
 }) {
   const tones = {
     default: "text-ink-secondary hover:text-ink hover:bg-surface-hover",
-    danger: "text-rose-500 hover:bg-rose-500/10",
-    warn: "text-amber-500 hover:bg-amber-500/10",
-    good: "text-emerald-500 hover:bg-emerald-500/10",
+    danger: "text-error hover:bg-error/10",
+    warn: "text-warning hover:bg-warning/10",
+    good: "text-success hover:bg-success/10",
   };
   return (
     <button
@@ -759,7 +759,7 @@ export default function Admin() {
                           {u.role === "admin" && !u.deleted && (
                             <span className="text-[10px] uppercase font-bold rounded px-1.5 py-0.5 bg-brand/15 text-brand">admin</span>
                           )}
-                          {u.oidc_linked && <span className="text-[10px] uppercase font-bold rounded px-1.5 py-0.5 bg-sky-500/15 text-sky-500">SSO</span>}
+                          {u.oidc_linked && <span className="text-[10px] uppercase font-bold rounded px-1.5 py-0.5 bg-info/15 text-info">SSO</span>}
                         </p>
                         <p className="text-xs text-ink-muted truncate">
                           @{u.username}
@@ -868,7 +868,7 @@ export default function Admin() {
                   type="button"
                   onClick={() => void unlinkUserSso()}
                   disabled={unlinkingSso}
-                  className="text-xs font-medium text-rose-500 hover:underline disabled:opacity-50 cursor-pointer"
+                  className="text-xs font-medium text-error hover:underline disabled:opacity-50 cursor-pointer"
                 >
                   {unlinkingSso ? "Unlinking…" : "Unlink SSO"}
                 </button>
@@ -1019,7 +1019,7 @@ export default function Admin() {
                     className={`text-left rounded-xl border p-3 transition cursor-pointer ${
                       deleteMode === o.key
                         ? o.key === "erase"
-                          ? "border-rose-500 bg-rose-500/10"
+                          ? "border-error bg-error/10"
                           : "border-brand bg-brand/10"
                         : "border-line hover:bg-surface-hover"
                     }`}
@@ -1032,7 +1032,7 @@ export default function Admin() {
             )}
             {deleteMode === "erase" && (
               <div className="space-y-2">
-                <div className="flex items-start gap-2.5 rounded-xl border border-rose-500/30 bg-rose-500/10 p-3 text-rose-500">
+                <div className="flex items-start gap-2.5 rounded-xl border border-error/30 bg-error/10 p-3 text-error">
                   <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
                   <p className="text-xs">
                     {userToDelete?.deleted

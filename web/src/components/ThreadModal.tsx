@@ -51,9 +51,9 @@ export default function ThreadModal({ convo, root, onClose }: { convo: Convo; ro
       <div className="min-w-0 flex-1">
         <p className="text-xs">
           <span className="font-semibold">{m.sender_id === me.id ? "You" : m.sender?.display_name ?? "Someone"}</span>
-          <span className="text-zinc-400 ml-2">{fmtTime(m.sent_at)}</span>
-          {m.pending && <span className="text-zinc-400 ml-2">sending…</span>}
-          {m.failed && <span className="text-rose-500 ml-2">not sent</span>}
+          <span className="text-ink-muted ml-2">{fmtTime(m.sent_at)}</span>
+          {m.pending && <span className="text-ink-muted ml-2">sending…</span>}
+          {m.failed && <span className="text-error ml-2">not sent</span>}
         </p>
         <p className="text-sm break-words whitespace-pre-wrap">{textOf(m, decryptedContent)}</p>
       </div>
@@ -63,8 +63,8 @@ export default function ThreadModal({ convo, root, onClose }: { convo: Convo; ro
   return (
     <Modal open onClose={onClose} title="Thread">
       <div className="space-y-4">
-        <div className="rounded-lg border border-zinc-200 dark:border-zinc-700 p-3">{bubble(root)}</div>
-        <p className="text-xs font-semibold text-zinc-500">
+        <div className="rounded-lg border border-line p-3">{bubble(root)}</div>
+        <p className="text-xs font-semibold text-ink-muted">
           {replies.length} {replies.length === 1 ? "reply" : "replies"}
           {loading && <Loader2 className="inline h-3 w-3 animate-spin ml-2" />}
         </p>
@@ -74,7 +74,7 @@ export default function ThreadModal({ convo, root, onClose }: { convo: Convo; ro
         </div>
         <div className="flex items-center gap-2">
           <input className={inputCls} autoFocus value={text} onChange={(e) => setText(e.target.value)} onKeyDown={onKeyDown} placeholder="Reply in thread…" aria-label="Reply in thread" />
-          <button onClick={send} disabled={!text.trim()} className="h-10 w-10 shrink-0 rounded-xl bg-blue-600 hover:bg-blue-500 text-white flex items-center justify-center disabled:opacity-30" aria-label="Send reply">
+          <button onClick={send} disabled={!text.trim()} className="h-10 w-10 shrink-0 rounded-xl bg-brand hover:bg-brand text-white flex items-center justify-center disabled:opacity-30" aria-label="Send reply">
             <Send className="h-4 w-4" />
           </button>
         </div>

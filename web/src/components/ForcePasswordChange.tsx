@@ -39,7 +39,7 @@ export default function ForcePasswordChange() {
         <input className={inputCls} type="password" autoComplete="current-password" placeholder="Current password" value={current} onChange={(e) => setCurrent(e.target.value)} autoFocus />
         <input className={inputCls} type="password" autoComplete="new-password" placeholder="New password (8+ characters)" value={next} onChange={(e) => setNext(e.target.value)} />
         <input className={inputCls} type="password" autoComplete="new-password" placeholder="Confirm new password" value={confirm} onChange={(e) => setConfirm(e.target.value)} />
-        {mismatch && <p className="text-xs text-red-500">Passwords don't match</p>}
+        {mismatch && <p className="text-xs text-error">Passwords don't match</p>}
         {error && <Alert variant="error">{error}</Alert>}
         <button className={`${btnPrimary} w-full`} disabled={busy || !current || next.length < 8 || next !== confirm}>
           {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : null} Change password

@@ -3,8 +3,12 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 @theme {
-  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  --font-display: "Geist", "Inter", sans-serif;
+  /* System font stack only: neither Inter nor Geist is bundled or loaded
+     anywhere in this app, so naming them first just made every heading fall
+     through to a fallback after a failed lookup. Listing the platform fonts
+     directly gives the same rendered result without the dead reference. */
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-display: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
 }
 
 /* Map the runtime (dark-mode-aware) design tokens below into Tailwind's

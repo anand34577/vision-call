@@ -90,9 +90,9 @@ export default function CallsHistory() {
 
         {!historyLoaded && !historyError && <SkeletonList rows={5} />}
         {historyError && (
-          <div className="p-12 text-center flex flex-col items-center gap-3 bg-rose-950/20 border border-rose-900/50 rounded-xl">
-            <AlertTriangle className="h-10 w-10 text-rose-500" />
-            <p className="text-sm font-semibold text-rose-300">Couldn't load call history</p>
+          <div className="p-12 text-center flex flex-col items-center gap-3 bg-error/10 border border-error/10 rounded-xl">
+            <AlertTriangle className="h-10 w-10 text-error" />
+            <p className="text-sm font-semibold text-error">Couldn't load call history</p>
             <p className="text-xs text-ink-muted max-w-sm">{historyError}</p>
             <button onClick={() => void fetchHistory()} className={btnSecondary}>
               Try again
@@ -120,10 +120,10 @@ export default function CallsHistory() {
               .map((p) => p.user?.display_name ?? "Unknown");
             const Icon = c.is_conference ? Users : missedForMe ? PhoneMissed : outgoing ? PhoneOutgoing : PhoneIncoming;
             const iconCls = missedForMe
-              ? "bg-rose-100 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400"
+              ? "bg-error/10 dark:bg-error/10 text-error"
               : outgoing
                 ? "bg-brand/15 text-brand"
-                : "bg-emerald-100 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400";
+                : "bg-success/10 dark:bg-success/10 text-success";
 
             return (
               <div
@@ -134,7 +134,7 @@ export default function CallsHistory() {
                   <Icon className="h-5 w-5" />
                 </div>
                 <div className="min-w-0 flex-1">
-                  <p className={`text-sm font-semibold truncate ${missedForMe ? "text-rose-500" : "text-ink"}`}>
+                  <p className={`text-sm font-semibold truncate ${missedForMe ? "text-error" : "text-ink"}`}>
                     {others.length ? others.join(", ") : (c.initiator?.display_name ?? "Call")}
                     {c.is_conference && " (Group Call)"}
                   </p>
@@ -143,8 +143,8 @@ export default function CallsHistory() {
                       {timeAgo(c.started_at)}
                     </span>
                     {c.ended_at && <span>· {fmtDuration(c.started_at, c.ended_at)}</span>}
-                    {!c.ended_at && <span className="text-emerald-400 font-medium">· In progress</span>}
-                    {missedForMe && <span className="text-rose-400 font-medium">· Missed</span>}
+                    {!c.ended_at && <span className="text-success font-medium">· In progress</span>}
+                    {missedForMe && <span className="text-error font-medium">· Missed</span>}
                   </p>
                 </div>
 

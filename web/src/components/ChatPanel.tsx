@@ -97,7 +97,7 @@ function FormattedContent({ content, knownUsernames, myUsername }: { content: st
               href={part}
               target="_blank"
               rel="noopener noreferrer"
-              className="underline underline-offset-2 break-all text-sky-400 hover:text-sky-300 dark:text-sky-300 dark:hover:text-sky-200"
+              className="underline underline-offset-2 break-all text-info hover:text-info dark:hover:text-info"
               onClick={(e) => e.stopPropagation()}
             >
               {part}
@@ -113,7 +113,7 @@ function FormattedContent({ content, knownUsernames, myUsername }: { content: st
             return (
               <span
                 key={`${i}-${j}`}
-                className={`font-semibold rounded px-0.5 ${isMe ? "bg-amber-300/40 dark:bg-amber-500/30" : "bg-white/20 dark:bg-white/10"}`}
+                className={`font-semibold rounded px-0.5 ${isMe ? "bg-warning/40 dark:bg-warning/30" : "bg-white/20 dark:bg-white/10"}`}
               >
                 {bit}
               </span>
@@ -147,20 +147,20 @@ function EncryptedContent({ m, knownUsernames, myUsername }: { m: Message; known
 }
 
 function Ticks({ msg }: { msg: Message }) {
-  if (msg.read_at) return <CheckCheck className="h-4 w-4 text-sky-500" aria-label="Read" role="img" />;
-  if (msg.delivered_at) return <CheckCheck className="h-4 w-4 text-zinc-400" aria-label="Delivered" role="img" />;
-  return <Check className="h-4 w-4 text-zinc-400" aria-label="Sent" role="img" />;
+  if (msg.read_at) return <CheckCheck className="h-4 w-4 text-info" aria-label="Read" role="img" />;
+  if (msg.delivered_at) return <CheckCheck className="h-4 w-4 text-ink-muted" aria-label="Delivered" role="img" />;
+  return <Check className="h-4 w-4 text-ink-muted" aria-label="Sent" role="img" />;
 }
 
 // GroupSeen shows who has read one of my group messages (from each member's
 // last-read marker) instead of a single delivered/read tick.
 function GroupSeen({ msg, group, meID, reads }: { msg: Message; group: { members: { id: number; display_name: string }[] }; meID: number; reads?: Record<number, number> }) {
   const seenBy = group.members.filter((mem) => mem.id !== meID && (reads?.[mem.id] ?? 0) >= msg.id);
-  if (seenBy.length === 0) return <Check className="h-4 w-4 text-zinc-400" aria-label="Sent" role="img" />;
+  if (seenBy.length === 0) return <Check className="h-4 w-4 text-ink-muted" aria-label="Sent" role="img" />;
   const names = seenBy.map((x) => x.display_name).join(", ");
   return (
     <span className="inline-flex items-center gap-0.5" title={`Seen by ${names}`}>
-      <CheckCheck className="h-4 w-4 text-sky-500" aria-label={`Seen by ${names}`} role="img" />
+      <CheckCheck className="h-4 w-4 text-info" aria-label={`Seen by ${names}`} role="img" />
       <span>{seenBy.length}</span>
     </span>
   );
@@ -221,7 +221,7 @@ function MessageActions({
           onClick={onReact}
           title="React"
           aria-label="Add reaction"
-          className="h-9 w-9 rounded-full flex items-center justify-center text-zinc-500 dark:text-zinc-400 hover:text-amber-500 hover:bg-amber-50 dark:hover:bg-amber-950/40"
+          className="h-9 w-9 rounded-full flex items-center justify-center text-ink-muted-muted hover:text-warning hover:bg-warning/10 dark:hover:bg-warning/10"
         >
           <SmilePlus className="h-4 w-4" />
         </button>
@@ -229,7 +229,7 @@ function MessageActions({
           onClick={onReply}
           title="Reply"
           aria-label="Reply"
-          className="h-9 w-9 rounded-full flex items-center justify-center text-zinc-500 dark:text-zinc-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/40"
+          className="h-9 w-9 rounded-full flex items-center justify-center text-ink-muted-muted hover:text-brand dark:hover:text-brand hover:bg-brand/10 dark:hover:bg-brand/10"
         >
           <ReplyIcon className="h-4 w-4" />
         </button>
@@ -238,7 +238,7 @@ function MessageActions({
             onClick={onThread}
             title="Reply in thread"
             aria-label="Reply in thread"
-            className="h-9 w-9 rounded-full flex items-center justify-center text-zinc-500 dark:text-zinc-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/40"
+            className="h-9 w-9 rounded-full flex items-center justify-center text-ink-muted-muted hover:text-brand dark:hover:text-brand hover:bg-brand/10 dark:hover:bg-brand/10"
           >
             <MessageSquare className="h-4 w-4" />
           </button>
@@ -248,7 +248,7 @@ function MessageActions({
             onClick={onEdit}
             title="Edit"
             aria-label="Edit message"
-            className="h-9 w-9 rounded-full flex items-center justify-center text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+            className="h-9 w-9 rounded-full flex items-center justify-center text-ink-muted-muted hover:text-ink dark:hover:text-ink hover:bg-surface-hover dark:hover:bg-elevated"
           >
             <Pencil className="h-4 w-4" />
           </button>
@@ -259,7 +259,7 @@ function MessageActions({
             title={saved ? "Remove from saved" : "Save message"}
             aria-label={saved ? "Remove from saved" : "Save message"}
             aria-pressed={!!saved}
-            className={`h-9 w-9 rounded-full flex items-center justify-center hover:bg-amber-50 dark:hover:bg-amber-950/40 ${saved ? "text-amber-500" : "text-zinc-500 dark:text-zinc-400 hover:text-amber-600"}`}
+            className={`h-9 w-9 rounded-full flex items-center justify-center hover:bg-warning/10 dark:hover:bg-warning/10 ${saved ? "text-warning" : "text-ink-muted dark:text-ink-muted hover:text-warning"}`}
           >
             <Star className="h-4 w-4" fill={saved ? "currentColor" : "none"} />
           </button>
@@ -269,7 +269,7 @@ function MessageActions({
             onClick={onForward}
             title="Forward message"
             aria-label="Forward message"
-            className="h-9 w-9 rounded-full flex items-center justify-center text-zinc-500 dark:text-zinc-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/40"
+            className="h-9 w-9 rounded-full flex items-center justify-center text-ink-muted-muted hover:text-brand dark:hover:text-brand hover:bg-brand/10 dark:hover:bg-brand/10"
           >
             <Forward className="h-4 w-4" />
           </button>
@@ -280,7 +280,7 @@ function MessageActions({
             title={m.pinned_at ? "Unpin message" : "Pin message"}
             aria-label={m.pinned_at ? "Unpin message" : "Pin message"}
             aria-pressed={!!m.pinned_at}
-            className="h-9 w-9 rounded-full flex items-center justify-center text-zinc-500 dark:text-zinc-400 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-950/40"
+            className="h-9 w-9 rounded-full flex items-center justify-center text-ink-muted-muted hover:text-warning hover:bg-warning/10 dark:hover:bg-warning/10"
           >
             {m.pinned_at ? <PinOff className="h-4 w-4" /> : <Pin className="h-4 w-4" />}
           </button>
@@ -290,7 +290,7 @@ function MessageActions({
             onClick={onDelete}
             title="Delete message"
             aria-label="Delete message"
-            className="h-9 w-9 rounded-full flex items-center justify-center text-zinc-500 dark:text-zinc-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40"
+            className="h-9 w-9 rounded-full flex items-center justify-center text-ink-muted-muted hover:text-error hover:bg-error/10 dark:hover:bg-error/10"
           >
             <Trash2 className="h-4 w-4" />
           </button>
@@ -348,12 +348,12 @@ function ReactionPills({
           onClick={() => onToggle(emoji)}
           className={`text-xs rounded-full px-1.5 py-0.5 border flex items-center gap-1 transition ${
             iReacted
-              ? "bg-indigo-50 dark:bg-indigo-500/10 border-indigo-300 dark:border-indigo-700"
-              : "bg-zinc-800 border-zinc-700 hover:border-zinc-300 dark:hover:border-zinc-600"
+              ? "bg-brand/10 dark:bg-brand/10 border-brand"
+              : "bg-elevated border-line hover:border-line dark:hover:border-line-strong"
           }`}
         >
           <span>{emoji}</span>
-          <span className="text-[10px] text-zinc-500 text-zinc-400">{count}</span>
+          <span className="text-[10px] text-ink-muted text-ink-muted">{count}</span>
         </button>
       ))}
     </div>
@@ -489,18 +489,18 @@ export default function ChatPanel({ onBack }: { onBack: () => void }) {
         title={muted ? "Unmute notifications" : "Mute notifications"}
         aria-label={muted ? "Unmute notifications" : "Mute notifications"}
         aria-pressed={muted}
-        className="h-10 w-10 rounded-xl hover:bg-zinc-100 dark:hover:bg-zinc-800/80 flex items-center justify-center text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 transition cursor-pointer"
+        className="h-10 w-10 rounded-xl hover:bg-surface-hover dark:hover:bg-elevated/80 flex items-center justify-center text-ink-muted-muted hover:text-ink dark:hover:text-ink transition cursor-pointer"
       >
-        {muted ? <BellOff className="h-4 w-4 text-amber-500" /> : <Bell className="h-4 w-4" />}
+        {muted ? <BellOff className="h-4 w-4 text-warning" /> : <Bell className="h-4 w-4" />}
       </button>
       <button
         onClick={() => { void setConvoPref(active, { archived: !archived }); if (!archived) onBack(); }}
         title={archived ? "Move back to chats" : "Archive chat"}
         aria-label={archived ? "Unarchive chat" : "Archive chat"}
         aria-pressed={archived}
-        className="h-10 w-10 rounded-xl hover:bg-zinc-100 dark:hover:bg-zinc-800/80 flex items-center justify-center text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 transition cursor-pointer"
+        className="h-10 w-10 rounded-xl hover:bg-surface-hover dark:hover:bg-elevated/80 flex items-center justify-center text-ink-muted-muted hover:text-ink dark:hover:text-ink transition cursor-pointer"
       >
-        <Archive className={`h-4 w-4 ${archived ? "text-blue-500" : ""}`} />
+        <Archive className={`h-4 w-4 ${archived ? "text-brand" : ""}`} />
       </button>
     </>
   ) : null;
@@ -516,7 +516,7 @@ export default function ChatPanel({ onBack }: { onBack: () => void }) {
       disabled={exporting}
       title="Export conversation (readable text file)"
       aria-label="Export conversation"
-      className="h-10 w-10 rounded-xl hover:bg-zinc-100 dark:hover:bg-zinc-800/80 flex items-center justify-center text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 transition cursor-pointer"
+      className="h-10 w-10 rounded-xl hover:bg-surface-hover dark:hover:bg-elevated/80 flex items-center justify-center text-ink-muted-muted hover:text-ink dark:hover:text-ink transition cursor-pointer"
     >
       {exporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
     </button>
@@ -985,23 +985,23 @@ export default function ChatPanel({ onBack }: { onBack: () => void }) {
 
   return (
     <div
-      className="flex-1 flex flex-col min-w-0 bg-white dark:bg-zinc-950 relative"
+      className="flex-1 flex flex-col min-w-0 bg-white dark:bg-page relative"
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
       {dragOver && (
-        <div className="absolute inset-0 z-30 bg-blue-600/20 backdrop-blur-sm border-2 border-dashed border-indigo-500 rounded-xl flex items-center justify-center pointer-events-none">
-          <div className="bg-zinc-900 px-6 py-4 rounded-2xl shadow-xl flex items-center gap-3">
-            <Paperclip className="h-6 w-6 text-blue-400 animate-bounce" />
+        <div className="absolute inset-0 z-30 bg-brand/20 backdrop-blur-sm border-2 border-dashed border-brand rounded-xl flex items-center justify-center pointer-events-none">
+          <div className="bg-elevated px-6 py-4 rounded-2xl shadow-xl flex items-center gap-3">
+            <Paperclip className="h-6 w-6 text-brand animate-bounce" />
             <p className="font-semibold text-sm">Drop file to attach</p>
           </div>
         </div>
       )}
 
       {/* header */}
-      <div className="flex items-center gap-3 px-4 sm:px-5 h-16 border-b border-zinc-200 dark:border-zinc-800 bg-white/90 dark:bg-zinc-950/80 backdrop-blur-xl shrink-0 z-10">
-        <button className="md:hidden h-10 w-10 -ml-1 text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 rounded-xl hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center justify-center" onClick={onBack} aria-label="Back to conversations">
+      <div className="flex items-center gap-3 px-4 sm:px-5 h-16 border-b border-line bg-white/90 dark:bg-page/80 backdrop-blur-xl shrink-0 z-10">
+        <button className="md:hidden h-10 w-10 -ml-1 text-ink-muted-muted hover:text-ink dark:hover:text-ink rounded-xl hover:bg-surface-hover dark:hover:bg-elevated flex items-center justify-center" onClick={onBack} aria-label="Back to conversations">
           <ArrowLeft className="h-5 w-5" />
         </button>
         {isDM && peer ? (
@@ -1013,15 +1013,15 @@ export default function ChatPanel({ onBack }: { onBack: () => void }) {
               </span>
             </div>
             <div className="min-w-0 flex-1">
-              <p className="font-bold text-sm text-zinc-900 dark:text-zinc-100 truncate tracking-tight">{peer.display_name}</p>
-              <p className="text-xs text-zinc-500 font-medium">{presenceLabel(peer.status)}{peer.status_text ? ` · ${peer.status_text}` : ""}</p>
+              <p className="font-bold text-sm text-ink truncate tracking-tight">{peer.display_name}</p>
+              <p className="text-xs text-ink-muted font-medium">{presenceLabel(peer.status)}{peer.status_text ? ` · ${peer.status_text}` : ""}</p>
             </div>
             <div className="flex items-center gap-1.5">
               <button
                 onClick={() => peer && void startDmCall({ id: peer.id, display_name: peer.display_name, username: peer.username, avatar_file_id: peer.avatar_file_id }, false)}
                 title="Voice call"
                 aria-label="Start voice call"
-                className="h-10 w-10 rounded-xl hover:bg-zinc-100 dark:hover:bg-zinc-800/80 flex items-center justify-center text-zinc-500 dark:text-zinc-300 border border-transparent hover:border-zinc-200 dark:hover:border-zinc-700/60 transition cursor-pointer"
+                className="h-10 w-10 rounded-xl hover:bg-surface-hover dark:hover:bg-elevated/80 flex items-center justify-center text-ink-muted-secondary border border-transparent hover:border-line dark:hover:border-line/60 transition cursor-pointer"
               >
                 <Phone className="h-4 w-4" />
               </button>
@@ -1029,7 +1029,7 @@ export default function ChatPanel({ onBack }: { onBack: () => void }) {
                 onClick={() => peer && void startDmCall({ id: peer.id, display_name: peer.display_name, username: peer.username, avatar_file_id: peer.avatar_file_id }, true)}
                 title="Video call"
                 aria-label="Start video call"
-                className="h-10 px-3.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold flex items-center gap-1.5 shadow-md shadow-blue-600/25 active:scale-95 transition cursor-pointer"
+                className="h-10 px-3.5 rounded-xl bg-brand hover:bg-brand text-white text-xs font-semibold flex items-center gap-1.5 shadow-md shadow-brand/25 active:scale-95 transition cursor-pointer"
               >
                 <Video className="h-4 w-4" />
                 <span className="hidden sm:inline">Call</span>
@@ -1040,9 +1040,9 @@ export default function ChatPanel({ onBack }: { onBack: () => void }) {
                 title={peerBlocked ? "Unblock this person" : "Block this person"}
                 aria-label={peerBlocked ? "Unblock this person" : "Block this person"}
                 aria-pressed={peerBlocked}
-                className="h-10 w-10 rounded-xl hover:bg-zinc-100 dark:hover:bg-zinc-800/80 flex items-center justify-center text-zinc-500 dark:text-zinc-400 hover:text-rose-600 transition cursor-pointer"
+                className="h-10 w-10 rounded-xl hover:bg-surface-hover dark:hover:bg-elevated/80 flex items-center justify-center text-ink-muted-muted hover:text-error transition cursor-pointer"
               >
-                <Ban className={`h-4 w-4 ${peerBlocked ? "text-rose-500" : ""}`} />
+                <Ban className={`h-4 w-4 ${peerBlocked ? "text-error" : ""}`} />
               </button>
               {prefButtons}
               <button
@@ -1051,7 +1051,7 @@ export default function ChatPanel({ onBack }: { onBack: () => void }) {
                 title={encrypted ? "Encryption on — click to turn off" : "Turn on end-to-end encryption for this chat"}
                 aria-label={encrypted ? "Turn off encryption" : "Turn on encryption"}
                 aria-pressed={encrypted}
-                className={`h-10 w-10 rounded-xl flex items-center justify-center transition border ${encrypted ? "text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-800/60" : "text-zinc-500 dark:text-zinc-400 border-transparent hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:hover:text-zinc-200"}`}
+                className={`h-10 w-10 rounded-xl flex items-center justify-center transition border ${encrypted ? "text-success dark:text-success bg-success/10 border-success dark:border-success/10" : "text-ink-muted dark:text-ink-muted border-transparent hover:bg-surface-hover dark:hover:bg-elevated hover:text-ink dark:hover:text-ink"}`}
               >
                 {encryptBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : encrypted ? <Lock className="h-4 w-4" /> : <LockOpen className="h-4 w-4" />}
               </button>
@@ -1060,9 +1060,9 @@ export default function ChatPanel({ onBack }: { onBack: () => void }) {
         ) : group ? (
           <>
             <Avatar name={group.name} id={group.id} fileId={group.avatar_file_id} size="md" />
-            <button type="button" onClick={() => setShowGroupInfo(true)} className="min-w-0 flex-1 text-left rounded-lg px-1 -ml-1 hover:bg-zinc-100 dark:hover:bg-zinc-800/60 transition" aria-label={`Open details for ${group.name}`}>
-              <p className="font-bold text-sm text-zinc-900 dark:text-zinc-100 truncate hover:underline tracking-tight">{group.name}</p>
-              <p className="text-xs text-zinc-500 font-medium truncate">
+            <button type="button" onClick={() => setShowGroupInfo(true)} className="min-w-0 flex-1 text-left rounded-lg px-1 -ml-1 hover:bg-surface-hover dark:hover:bg-elevated/60 transition" aria-label={`Open details for ${group.name}`}>
+              <p className="font-bold text-sm text-ink truncate hover:underline tracking-tight">{group.name}</p>
+              <p className="text-xs text-ink-muted font-medium truncate">
                 {group.members.length} members{group.topic ? ` · ${group.topic}` : ""}
               </p>
             </button>
@@ -1071,7 +1071,7 @@ export default function ChatPanel({ onBack }: { onBack: () => void }) {
                 onClick={() => void startGroupCall(group)}
                 title="Start group call"
                 aria-label="Start group call"
-                className="h-10 px-3.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold flex items-center gap-1.5 shadow-md shadow-blue-600/25 active:scale-95 transition cursor-pointer"
+                className="h-10 px-3.5 rounded-xl bg-brand hover:bg-brand text-white text-xs font-semibold flex items-center gap-1.5 shadow-md shadow-brand/25 active:scale-95 transition cursor-pointer"
               >
                 <Video className="h-4 w-4" />
                 <span className="hidden sm:inline">Call</span>
@@ -1084,7 +1084,7 @@ export default function ChatPanel({ onBack }: { onBack: () => void }) {
                 title={encrypted ? "Encryption on — click to turn off" : "Turn on end-to-end encryption for this group"}
                 aria-label={encrypted ? "Turn off encryption" : "Turn on encryption"}
                 aria-pressed={encrypted}
-                className={`h-10 w-10 rounded-xl flex items-center justify-center transition border ${encrypted ? "text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-800/60" : "text-zinc-500 dark:text-zinc-400 border-transparent hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:hover:text-zinc-200"}`}
+                className={`h-10 w-10 rounded-xl flex items-center justify-center transition border ${encrypted ? "text-success dark:text-success bg-success/10 border-success dark:border-success/10" : "text-ink-muted dark:text-ink-muted border-transparent hover:bg-surface-hover dark:hover:bg-elevated hover:text-ink dark:hover:text-ink"}`}
               >
                 {encryptBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : encrypted ? <Lock className="h-4 w-4" /> : <LockOpen className="h-4 w-4" />}
               </button>
@@ -1092,7 +1092,7 @@ export default function ChatPanel({ onBack }: { onBack: () => void }) {
                 onClick={() => setShowGroupInfo(true)}
                 title="Group details"
                 aria-label="Open group details"
-                className="h-10 w-10 rounded-xl hover:bg-zinc-100 dark:hover:bg-zinc-800/80 flex items-center justify-center text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 transition cursor-pointer"
+                className="h-10 w-10 rounded-xl hover:bg-surface-hover dark:hover:bg-elevated/80 flex items-center justify-center text-ink-muted-muted hover:text-ink dark:hover:text-ink transition cursor-pointer"
               >
                 <MoreVertical className="h-4 w-4" />
               </button>
@@ -1102,10 +1102,10 @@ export default function ChatPanel({ onBack }: { onBack: () => void }) {
       </div>
 
       {pinnedMessages.length > 0 && (
-        <div className="border-b border-zinc-800 bg-amber-50/60 dark:bg-amber-950/20 shrink-0">
+        <div className="border-b border-line bg-warning/10 shrink-0">
           <button
             onClick={() => setShowPinned((v) => !v)}
-            className="w-full flex items-center gap-2 px-4 py-1.5 text-xs font-medium text-amber-700 dark:text-amber-300"
+            className="w-full flex items-center gap-2 px-4 py-1.5 text-xs font-medium text-warning"
           >
             <Pin className="h-3.5 w-3.5" />
             {pinnedMessages.length} pinned message{pinnedMessages.length === 1 ? "" : "s"}
@@ -1114,13 +1114,13 @@ export default function ChatPanel({ onBack }: { onBack: () => void }) {
             <div className="max-h-40 overflow-y-auto px-4 pb-2 space-y-1.5">
               {pinnedMessages.map((m) => (
                 <div key={m.id} className="text-xs bg-white/70 dark:bg-black/20 rounded-lg px-2.5 py-1.5 flex items-start gap-2">
-                  <span className="font-semibold text-amber-700 dark:text-amber-300 shrink-0">{m.sender?.display_name ?? "Someone"}:</span>
+                  <span className="font-semibold text-warning shrink-0">{m.sender?.display_name ?? "Someone"}:</span>
                   <span className="truncate flex-1 flex items-center gap-1">
                     {!m.content && m.file && <Paperclip className="h-3 w-3 shrink-0" />}
                     <span className="truncate">{m.content || m.file?.name || ""}</span>
                   </span>
                   {canPin(m, me.id, me.role === "admin", group) && (
-                    <button onClick={() => pinMessage(m, false)} className="shrink-0 text-amber-600 hover:text-amber-800" title="Unpin" aria-label="Unpin">
+                    <button onClick={() => pinMessage(m, false)} className="shrink-0 text-warning hover:text-warning" title="Unpin" aria-label="Unpin">
                       <PinOff className="h-3.5 w-3.5" />
                     </button>
                   )}
@@ -1142,7 +1142,7 @@ export default function ChatPanel({ onBack }: { onBack: () => void }) {
                 void loadMessages(active, messages[0]?.id);
               }}
               disabled={historyLoading[isDM ? `dm:${(active as any).peerID}` : `g:${active.groupID}`]}
-              className="text-xs text-indigo-500 hover:underline"
+              className="text-xs text-brand hover:underline"
             >
               {historyLoading[isDM ? `dm:${(active as any).peerID}` : `g:${active.groupID}`] ? "Loading…" : "Load older messages"}
             </button>
@@ -1157,7 +1157,7 @@ export default function ChatPanel({ onBack }: { onBack: () => void }) {
             <div key={m.id} className="animate-msg-in">
               {showDay && (
                 <div className="flex justify-center py-3">
-                  <span className="text-[11px] font-medium text-zinc-400 bg-zinc-200/60 bg-zinc-800/60 rounded-full px-3 py-1">
+                  <span className="text-[11px] font-medium text-ink-muted bg-surface-hover rounded-full px-3 py-1">
                     {day}
                   </span>
                 </div>
@@ -1190,7 +1190,7 @@ export default function ChatPanel({ onBack }: { onBack: () => void }) {
                       type="button"
                       onClick={() => document.getElementById(`msg-${m.reply_to!.id}`)?.scrollIntoView({ behavior: "smooth", block: "center" })}
                       title="Jump to replied message"
-                      className={`mb-1 rounded-lg px-2.5 py-1 text-xs border-l-2 truncate w-full text-left hover:opacity-80 transition ${mine ? "border-indigo-300 bg-indigo-50 dark:bg-indigo-500/10 text-indigo-700 dark:text-indigo-300 ml-auto" : "border-zinc-300 dark:border-zinc-600 bg-zinc-100 dark:bg-zinc-800/60 text-zinc-600 dark:text-zinc-400"}`}
+                      className={`mb-1 rounded-lg px-2.5 py-1 text-xs border-l-2 truncate w-full text-left hover:opacity-80 transition ${mine ? "border-brand bg-brand/10 text-brand ml-auto" : "border-line dark:border-line-strong bg-surface-hover dark:bg-elevated/60 text-ink-secondary-muted"}`}
                     >
                       <span className="font-semibold">{m.reply_to.sender?.display_name ?? "Someone"}: </span>
                       {m.reply_to.deleted ? (
@@ -1209,16 +1209,16 @@ export default function ChatPanel({ onBack }: { onBack: () => void }) {
                   <div
                     className={`rounded-2xl px-4 py-2.5 text-sm shadow-2xs transition-all ${
                       m.deleted_at
-                        ? "bg-transparent border border-dashed border-zinc-300 dark:border-zinc-700 text-zinc-500 dark:text-zinc-400 italic"
+                        ? "bg-transparent border border-dashed border-line text-ink-muted-muted italic"
                         : mine
                           ? m.failed
-                            ? "bg-rose-600 text-white rounded-br-md shadow-sm shadow-rose-600/20"
-                            : "bg-blue-600 text-white rounded-br-md shadow-md shadow-blue-600/20"
-                          : "bg-zinc-100 dark:bg-[#151b28] border border-zinc-200 dark:border-white/10 text-zinc-900 dark:text-zinc-100 rounded-bl-md shadow-2xs"
+                            ? "bg-error text-white rounded-br-md shadow-sm shadow-error/20"
+                            : "bg-brand text-white rounded-br-md shadow-md shadow-brand/20"
+                          : "bg-surface-hover dark:bg-[#151b28] border border-line dark:border-white/10 text-ink rounded-bl-md shadow-2xs"
                     }`}
                   >
                     {!mine && isDM === false && !m.deleted_at && (
-                      <p className="text-xs font-semibold text-indigo-500 dark:text-indigo-300 mb-0.5">
+                      <p className="text-xs font-semibold text-brand mb-0.5">
                         {m.sender?.display_name}
                       </p>
                     )}
@@ -1259,7 +1259,7 @@ export default function ChatPanel({ onBack }: { onBack: () => void }) {
                           <button
                             type="button"
                             onClick={() => setLightbox({ src: `/api/files/${m.file!.id}`, name: m.file!.name })}
-                            className="block rounded-lg mb-1.5 overflow-hidden focus-visible:ring-2 focus-visible:ring-blue-500"
+                            className="block rounded-lg mb-1.5 overflow-hidden focus-visible:ring-2 focus-visible:ring-brand"
                             aria-label={`Open image ${m.file.name}`}
                           >
                             <img
@@ -1287,7 +1287,7 @@ export default function ChatPanel({ onBack }: { onBack: () => void }) {
                             download={m.file.name}
                             className={`flex items-center gap-3 mb-1.5 rounded-xl px-3 py-2.5 min-w-[12rem] transition ${mine ? "bg-white/15 hover:bg-white/25" : "bg-black/5 dark:bg-white/5 hover:bg-black/10 dark:hover:bg-white/10"}`}
                           >
-                            <span className={`h-9 w-9 rounded-lg flex items-center justify-center shrink-0 ${mine ? "bg-white/20" : "bg-blue-600/15 text-blue-600 dark:text-blue-400"}`}>
+                            <span className={`h-9 w-9 rounded-lg flex items-center justify-center shrink-0 ${mine ? "bg-white/20" : "bg-brand/15 text-brand"}`}>
                               <FileIcon className="h-4.5 w-4.5" />
                             </span>
                             <span className="min-w-0 flex-1">
@@ -1304,7 +1304,7 @@ export default function ChatPanel({ onBack }: { onBack: () => void }) {
                         ) : (
                           m.content && <FormattedContent content={m.content} knownUsernames={knownUsernames} myUsername={me.username} />
                         )}
-                        <div className={`flex items-center justify-end gap-1.5 text-[10px] mt-0.5 ${mine ? "text-blue-100" : "text-zinc-500 dark:text-zinc-400"}`}>
+                        <div className={`flex items-center justify-end gap-1.5 text-[10px] mt-0.5 ${mine ? "text-brand" : "text-ink-muted dark:text-ink-muted"}`}>
                           {m.failed ? (
                             <div className="flex items-center gap-1 text-white font-medium">
                               <AlertCircle className="h-3 w-3" />
@@ -1334,7 +1334,7 @@ export default function ChatPanel({ onBack }: { onBack: () => void }) {
                     <button
                       type="button"
                       onClick={() => setThreadRoot(m)}
-                      className={`mt-1 flex items-center gap-1 text-xs font-semibold text-blue-500 hover:underline ${mine ? "ml-auto" : ""}`}
+                      className={`mt-1 flex items-center gap-1 text-xs font-semibold text-brand hover:underline ${mine ? "ml-auto" : ""}`}
                     >
                       <MessageSquare className="h-3.5 w-3.5" /> {m.thread_count} {m.thread_count === 1 ? "reply" : "replies"}
                     </button>
@@ -1361,34 +1361,34 @@ export default function ChatPanel({ onBack }: { onBack: () => void }) {
           );
         })}
         {typingText && (
-          <div className="flex items-center gap-2 pt-1 text-xs text-zinc-400">
-            <div className="bg-zinc-800 border border-zinc-700 rounded-full px-3 py-1 flex items-center gap-1.5">
-              <span className="typing-dot h-1.5 w-1.5 rounded-full bg-indigo-500 inline-block" />
-              <span className="typing-dot h-1.5 w-1.5 rounded-full bg-indigo-500 inline-block" />
-              <span className="typing-dot h-1.5 w-1.5 rounded-full bg-indigo-500 inline-block" />
-              <span className="text-[11px] ml-1 text-zinc-500 text-zinc-400">{typingText}</span>
+          <div className="flex items-center gap-2 pt-1 text-xs text-ink-muted">
+            <div className="bg-elevated border border-line rounded-full px-3 py-1 flex items-center gap-1.5">
+              <span className="typing-dot h-1.5 w-1.5 rounded-full bg-brand inline-block" />
+              <span className="typing-dot h-1.5 w-1.5 rounded-full bg-brand inline-block" />
+              <span className="typing-dot h-1.5 w-1.5 rounded-full bg-brand inline-block" />
+              <span className="text-[11px] ml-1 text-ink-muted text-ink-muted">{typingText}</span>
             </div>
           </div>
         )}
       </div>
 
       {/* composer */}
-      <div className="p-3 border-t border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shrink-0">
+      <div className="p-3 border-t border-line bg-white dark:bg-elevated shrink-0">
         {replyTo && (
-          <div className="mb-2 flex items-center gap-2 rounded-lg bg-zinc-800 border-l-2 border-indigo-500 px-2.5 py-1.5">
-            <ReplyIcon className="h-3.5 w-3.5 text-indigo-500 shrink-0" />
+          <div className="mb-2 flex items-center gap-2 rounded-lg bg-elevated border-l-2 border-brand px-2.5 py-1.5">
+            <ReplyIcon className="h-3.5 w-3.5 text-brand shrink-0" />
             <div className="min-w-0 flex-1">
-              <p className="text-[11px] font-semibold text-blue-400">
+              <p className="text-[11px] font-semibold text-brand">
                 Replying to {replyTo.sender_id === me.id ? "yourself" : replyTo.sender?.display_name ?? "message"}
               </p>
-              <p className="text-xs text-zinc-500 text-zinc-400 truncate flex items-center gap-1">
+              <p className="text-xs text-ink-muted text-ink-muted truncate flex items-center gap-1">
                 {!replyTo.content && replyTo.file && <Paperclip className="h-3 w-3 shrink-0" />}
                 <span className="truncate">{replyTo.content || replyTo.file?.name || ""}</span>
               </p>
             </div>
             <button
               onClick={() => setReplyTo(null)}
-              className="h-6 w-6 shrink-0 rounded-full hover:bg-zinc-200 hover:bg-zinc-700 flex items-center justify-center text-zinc-400"
+              className="h-6 w-6 shrink-0 rounded-full hover:bg-surface-hover hover:bg-surface-hover flex items-center justify-center text-ink-muted"
               aria-label="Cancel reply"
             >
               <X className="h-3.5 w-3.5" />
@@ -1399,14 +1399,14 @@ export default function ChatPanel({ onBack }: { onBack: () => void }) {
           <button
             type="button"
             onClick={clearSendError}
-            className="mb-2 w-full text-left text-xs text-rose-600 dark:text-rose-400 flex items-center justify-between"
+            className="mb-2 w-full text-left text-xs text-error flex items-center justify-between"
             role="alert"
           >
             <span>{sendError}</span>
             <span className="font-semibold underline">Dismiss</span>
           </button>
         )}
-        {uploadError && <p className="mb-2 text-xs text-rose-600 dark:text-rose-400" role="alert">{uploadError}</p>}
+        {uploadError && <p className="mb-2 text-xs text-error" role="alert">{uploadError}</p>}
         <AttachmentPreview
           files={staged}
           onAddMore={() => fileInput.current?.click()}
@@ -1418,9 +1418,9 @@ export default function ChatPanel({ onBack }: { onBack: () => void }) {
           encrypted={encrypted}
         />
         {peerBlocked ? (
-          <div className="flex items-center justify-between gap-3 rounded-xl bg-zinc-100 dark:bg-zinc-800 px-4 py-3 text-sm">
+          <div className="flex items-center justify-between gap-3 rounded-xl bg-surface-hover dark:bg-elevated px-4 py-3 text-sm">
             <span>You blocked {peer?.display_name}. They can't message you.</span>
-            <button onClick={() => void toggleBlock()} disabled={blockBusy} className="font-semibold text-blue-500 hover:underline">Unblock</button>
+            <button onClick={() => void toggleBlock()} disabled={blockBusy} className="font-semibold text-brand hover:underline">Unblock</button>
           </div>
         ) : (
         <div className="flex items-end gap-2">
@@ -1436,7 +1436,7 @@ export default function ChatPanel({ onBack }: { onBack: () => void }) {
           />
           <button
             onClick={() => setShowPoll(true)}
-            className="h-10 w-10 rounded-xl hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center justify-center text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 shrink-0 transition cursor-pointer border border-transparent hover:border-zinc-200 dark:hover:border-zinc-700/60"
+            className="h-10 w-10 rounded-xl hover:bg-surface-hover dark:hover:bg-elevated flex items-center justify-center text-ink-muted-muted hover:text-ink dark:hover:text-ink shrink-0 transition cursor-pointer border border-transparent hover:border-line dark:hover:border-line/60"
             title="Create a poll"
             aria-label="Create a poll"
           >
@@ -1445,11 +1445,11 @@ export default function ChatPanel({ onBack }: { onBack: () => void }) {
           <button
             onClick={() => fileInput.current?.click()}
             disabled={uploading}
-            className="h-10 w-10 rounded-xl hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center justify-center text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 shrink-0 transition cursor-pointer border border-transparent hover:border-zinc-200 dark:hover:border-zinc-700/60"
+            className="h-10 w-10 rounded-xl hover:bg-surface-hover dark:hover:bg-elevated flex items-center justify-center text-ink-muted-muted hover:text-ink dark:hover:text-ink shrink-0 transition cursor-pointer border border-transparent hover:border-line dark:hover:border-line/60"
             title="Attach files (or drag & drop)"
             aria-label="Attach files"
           >
-            {uploading ? <Loader2 className="h-5 w-5 animate-spin text-blue-500" /> : <Paperclip className="h-5 w-5" />}
+            {uploading ? <Loader2 className="h-5 w-5 animate-spin text-brand" /> : <Paperclip className="h-5 w-5" />}
           </button>
           <div className="relative flex-1 flex">
           {mention && mentionCandidates.length > 0 && (
@@ -1479,30 +1479,30 @@ export default function ChatPanel({ onBack }: { onBack: () => void }) {
             placeholder={encrypted ? "Encrypted message… (Enter to send)" : "Type a message… (Enter to send)"}
             aria-label="Message"
             title="Enter to send, Shift+Enter for new line"
-            className="flex-1 resize-none rounded-2xl border border-zinc-200 dark:border-white/10 bg-zinc-50 dark:bg-zinc-900/90 px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 max-h-32 transition shadow-2xs text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 dark:placeholder:text-zinc-500"
+            className="flex-1 resize-none rounded-2xl border border-line dark:border-white/10 bg-surface dark:bg-elevated/90 px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-brand/30 focus:border-brand max-h-32 transition shadow-2xs text-ink placeholder:text-ink-muted dark:placeholder:text-ink-muted"
           />
           </div>
           {recording ? (
             <>
-              <span className="h-10 px-3 rounded-xl flex items-center gap-2 text-xs font-semibold text-rose-600" role="status" aria-live="polite">
-                <span className="h-2 w-2 rounded-full bg-rose-500 animate-pulse" /> {Math.floor(recSecs / 60)}:{String(recSecs % 60).padStart(2, "0")}
+              <span className="h-10 px-3 rounded-xl flex items-center gap-2 text-xs font-semibold text-error" role="status" aria-live="polite">
+                <span className="h-2 w-2 rounded-full bg-error animate-pulse" /> {Math.floor(recSecs / 60)}:{String(recSecs % 60).padStart(2, "0")}
               </span>
-              <button onClick={() => stopRecording(false)} className="h-10 w-10 rounded-xl hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center justify-center text-zinc-500" aria-label="Cancel recording" title="Cancel">
+              <button onClick={() => stopRecording(false)} className="h-10 w-10 rounded-xl hover:bg-surface-hover dark:hover:bg-elevated flex items-center justify-center text-ink-muted" aria-label="Cancel recording" title="Cancel">
                 <X className="h-5 w-5" />
               </button>
-              <button onClick={() => stopRecording(true)} className="h-10 w-10 rounded-xl bg-rose-600 hover:bg-rose-500 text-white flex items-center justify-center shrink-0" aria-label="Send voice message" title="Send voice message">
+              <button onClick={() => stopRecording(true)} className="h-10 w-10 rounded-xl bg-error hover:bg-error text-white flex items-center justify-center shrink-0" aria-label="Send voice message" title="Send voice message">
                 <Square className="h-4 w-4" fill="currentColor" />
               </button>
             </>
           ) : !text.trim() && canRecord ? (
-            <button onClick={() => void startRecording()} disabled={uploading} className="h-10 w-10 rounded-xl hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center justify-center text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 shrink-0 transition cursor-pointer" aria-label="Record voice message" title="Record voice message">
+            <button onClick={() => void startRecording()} disabled={uploading} className="h-10 w-10 rounded-xl hover:bg-surface-hover dark:hover:bg-elevated flex items-center justify-center text-ink-muted-muted hover:text-ink dark:hover:text-ink shrink-0 transition cursor-pointer" aria-label="Record voice message" title="Record voice message">
               <Mic className="h-5 w-5" />
             </button>
           ) : (
           <button
             onClick={send}
             disabled={!text.trim()}
-            className="h-10 w-10 rounded-xl bg-blue-600 hover:bg-blue-500 text-white flex items-center justify-center disabled:opacity-30 disabled:pointer-events-none shrink-0 shadow-md shadow-blue-600/25 active:scale-95 transition-all duration-150 cursor-pointer"
+            className="h-10 w-10 rounded-xl bg-brand hover:bg-brand text-white flex items-center justify-center disabled:opacity-30 disabled:pointer-events-none shrink-0 shadow-md shadow-brand/25 active:scale-95 transition-all duration-150 cursor-pointer"
             aria-label="Send"
             title="Send (Enter)"
           >
@@ -1523,8 +1523,8 @@ export default function ChatPanel({ onBack }: { onBack: () => void }) {
       {active && threadRoot && <ThreadModal convo={active} root={threadRoot} onClose={() => setThreadRoot(null)} />}
       <Modal open={blockConfirm} onClose={() => setBlockConfirm(false)} title="Block this person?">
         <div className="space-y-4">
-          <p className="text-sm text-zinc-400">
-            <span className="font-semibold text-zinc-900 dark:text-zinc-200">{peer?.display_name}</span> won't be able to send you direct messages, and you won't be able to send them any. Group chats and calls are unaffected. You can unblock them any time.
+          <p className="text-sm text-ink-muted">
+            <span className="font-semibold text-ink">{peer?.display_name}</span> won't be able to send you direct messages, and you won't be able to send them any. Group chats and calls are unaffected. You can unblock them any time.
           </p>
           <div className="flex justify-end gap-2">
             <button type="button" className={btnSecondary} onClick={() => setBlockConfirm(false)}>Cancel</button>
@@ -1559,12 +1559,12 @@ export default function ChatPanel({ onBack }: { onBack: () => void }) {
       <Modal open={!!forwardingMsg} onClose={() => { setForwardingMsg(null); setForwardSearch(""); }} title="Forward Message">
         <div className="space-y-3">
           {forwardingMsg && (
-            <p className="text-xs bg-zinc-800 rounded-lg px-2.5 py-1.5 truncate text-zinc-500 text-zinc-400">
+            <p className="text-xs bg-elevated rounded-lg px-2.5 py-1.5 truncate text-ink-muted text-ink-muted">
               {forwardingMsg.content}
             </p>
           )}
           <div className="relative">
-            <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-zinc-400" />
+            <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-ink-muted" />
             <input
               autoFocus
               value={forwardSearch}
@@ -1580,7 +1580,7 @@ export default function ChatPanel({ onBack }: { onBack: () => void }) {
                 <button
                   key={`g${g.id}`}
                   onClick={() => forwardTo({ kind: "group", groupID: g.id })}
-                  className="w-full flex items-center gap-2.5 rounded-lg px-2 py-1.5 hover:bg-zinc-800 transition text-left"
+                  className="w-full flex items-center gap-2.5 rounded-lg px-2 py-1.5 hover:bg-elevated transition text-left"
                 >
                   <Avatar name={g.name} id={g.id} fileId={g.avatar_file_id} size="sm" />
                   <p className="text-sm font-medium truncate">{g.name}</p>
@@ -1593,7 +1593,7 @@ export default function ChatPanel({ onBack }: { onBack: () => void }) {
                 <button
                   key={`u${u.id}`}
                   onClick={() => forwardTo({ kind: "dm", peerID: u.id })}
-                  className="w-full flex items-center gap-2.5 rounded-lg px-2 py-1.5 hover:bg-zinc-800 transition text-left"
+                  className="w-full flex items-center gap-2.5 rounded-lg px-2 py-1.5 hover:bg-elevated transition text-left"
                 >
                   <Avatar name={u.display_name} id={u.id} fileId={u.avatar_file_id} size="sm" />
                   <p className="text-sm font-medium truncate">{u.display_name}</p>
@@ -1617,14 +1617,14 @@ export default function ChatPanel({ onBack }: { onBack: () => void }) {
           title="Group Details"
         >
           <div className="space-y-4">
-            <div className="flex items-center gap-3 pb-3 border-b border-zinc-800">
+            <div className="flex items-center gap-3 pb-3 border-b border-line">
               <div className="relative shrink-0">
                 <Avatar name={group.name} id={group.id} fileId={group.avatar_file_id} size="lg" />
                 {canManageGroup && (
                   <button
                     onClick={() => groupFileInput.current?.click()}
                     disabled={groupAvatarBusy}
-                    className="absolute -bottom-1 -right-1 h-6 w-6 rounded-full bg-blue-600 hover:bg-indigo-500 text-white flex items-center justify-center shadow transition"
+                    className="absolute -bottom-1 -right-1 h-6 w-6 rounded-full bg-brand hover:bg-brand text-white flex items-center justify-center shadow transition"
                     title="Change group icon"
                     aria-label="Change group icon"
                   >
@@ -1657,14 +1657,14 @@ export default function ChatPanel({ onBack }: { onBack: () => void }) {
                     <button
                       onClick={() => void saveRename()}
                       disabled={renamingBusy || !nameDraft.trim()}
-                      className="h-7 w-7 shrink-0 rounded-lg bg-blue-600 hover:bg-indigo-500 text-white flex items-center justify-center disabled:opacity-50"
+                      className="h-7 w-7 shrink-0 rounded-lg bg-brand hover:bg-brand text-white flex items-center justify-center disabled:opacity-50"
                       aria-label="Save group name"
                     >
                       {renamingBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
                     </button>
                     <button
                       onClick={() => setEditingName(false)}
-                      className="h-7 w-7 shrink-0 rounded-lg hover:bg-zinc-800 flex items-center justify-center"
+                      className="h-7 w-7 shrink-0 rounded-lg hover:bg-elevated flex items-center justify-center"
                       aria-label="Cancel rename"
                     >
                       <X className="h-3.5 w-3.5" />
@@ -1674,18 +1674,18 @@ export default function ChatPanel({ onBack }: { onBack: () => void }) {
                   <div className="flex items-center gap-1.5">
                     <p className="font-bold text-base truncate">{group.name}</p>
                     {canManageGroup && (
-                      <button onClick={startRename} className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200" aria-label="Rename group" title="Rename group">
+                      <button onClick={startRename} className="text-ink-muted hover:text-ink-secondary dark:hover:text-ink" aria-label="Rename group" title="Rename group">
                         <Pencil className="h-3.5 w-3.5" />
                       </button>
                     )}
                   </div>
                 )}
-                <p className="text-xs text-zinc-400">{group.members.length} members{group.public ? " · public channel" : ""}</p>
+                <p className="text-xs text-ink-muted">{group.members.length} members{group.public ? " · public channel" : ""}</p>
                 {canManageGroup && (
-                  <label className="flex items-center gap-2 text-xs text-zinc-500 cursor-pointer pt-1">
+                  <label className="flex items-center gap-2 text-xs text-ink-muted cursor-pointer pt-1">
                     <input
                       type="checkbox"
-                      className="h-3.5 w-3.5 accent-blue-600"
+                      className="h-3.5 w-3.5 accent-brand"
                       checked={!!group.public}
                       onChange={(e) => void api.setGroupPublic(group.id, e.target.checked).then(() => useChats.getState().fetchGroups()).catch((err) => setGroupActionError(err?.message ?? "Could not change visibility"))}
                     />
@@ -1693,7 +1693,7 @@ export default function ChatPanel({ onBack }: { onBack: () => void }) {
                   </label>
                 )}
                 {group.avatar_file_id != null && canManageGroup && (
-                  <button type="button" onClick={() => void removeGroupAvatar()} disabled={groupAvatarBusy} className="text-xs text-rose-500 hover:underline">
+                  <button type="button" onClick={() => void removeGroupAvatar()} disabled={groupAvatarBusy} className="text-xs text-error hover:underline">
                     Remove icon
                   </button>
                 )}
@@ -1701,7 +1701,7 @@ export default function ChatPanel({ onBack }: { onBack: () => void }) {
             </div>
 
             <div>
-              <p className="text-xs font-semibold uppercase text-zinc-400 tracking-wider mb-1">Topic</p>
+              <p className="text-xs font-semibold uppercase text-ink-muted tracking-wider mb-1">Topic</p>
               {editingTopic ? (
                 <div className="flex items-start gap-1.5">
                   <textarea
@@ -1716,23 +1716,23 @@ export default function ChatPanel({ onBack }: { onBack: () => void }) {
                     <button
                       onClick={() => void saveTopic()}
                       disabled={topicBusy}
-                      className="h-7 w-7 rounded-lg bg-blue-600 hover:bg-indigo-500 text-white flex items-center justify-center disabled:opacity-50"
+                      className="h-7 w-7 rounded-lg bg-brand hover:bg-brand text-white flex items-center justify-center disabled:opacity-50"
                       aria-label="Save topic"
                     >
                       {topicBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
                     </button>
-                    <button onClick={() => setEditingTopic(false)} className="h-7 w-7 rounded-lg hover:bg-zinc-800 flex items-center justify-center" aria-label="Cancel topic edit">
+                    <button onClick={() => setEditingTopic(false)} className="h-7 w-7 rounded-lg hover:bg-elevated flex items-center justify-center" aria-label="Cancel topic edit">
                       <X className="h-3.5 w-3.5" />
                     </button>
                   </div>
                 </div>
               ) : (
                 <div className="flex items-start gap-1.5">
-                  <p className="text-sm text-zinc-500 text-zinc-400 flex-1 min-w-0 break-words">
-                    {group.topic || <span className="italic text-zinc-400">No topic set</span>}
+                  <p className="text-sm text-ink-muted text-ink-muted flex-1 min-w-0 break-words">
+                    {group.topic || <span className="italic text-ink-muted">No topic set</span>}
                   </p>
                   {canManageGroup && (
-                    <button onClick={startTopicEdit} className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 shrink-0" aria-label="Edit topic" title="Edit topic">
+                    <button onClick={startTopicEdit} className="text-ink-muted hover:text-ink-secondary dark:hover:text-ink shrink-0" aria-label="Edit topic" title="Edit topic">
                       <Pencil className="h-3.5 w-3.5" />
                     </button>
                   )}
@@ -1740,15 +1740,15 @@ export default function ChatPanel({ onBack }: { onBack: () => void }) {
               )}
             </div>
 
-            {groupActionError && <p className="text-sm text-rose-600 dark:text-rose-400" role="alert">{groupActionError}</p>}
+            {groupActionError && <p className="text-sm text-error" role="alert">{groupActionError}</p>}
 
             <div>
               <div className="flex items-center justify-between mb-2">
-                <p className="text-xs font-semibold uppercase text-zinc-400 tracking-wider">Members</p>
+                <p className="text-xs font-semibold uppercase text-ink-muted tracking-wider">Members</p>
                 {canManageGroup && (
                   <button
                     onClick={() => { setShowAddMembers((v) => !v); setGroupActionError(null); }}
-                    className="text-xs font-medium text-blue-400 hover:underline inline-flex items-center gap-1"
+                    className="text-xs font-medium text-brand hover:underline inline-flex items-center gap-1"
                   >
                     <UserPlus className="h-3.5 w-3.5" /> Add
                   </button>
@@ -1756,9 +1756,9 @@ export default function ChatPanel({ onBack }: { onBack: () => void }) {
               </div>
 
               {showAddMembers && (
-                <div className="mb-3 border border-zinc-800 rounded-xl p-2 space-y-2">
+                <div className="mb-3 border border-line rounded-xl p-2 space-y-2">
                   <div className="relative">
-                    <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-zinc-400" />
+                    <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-ink-muted" />
                     <input
                       value={memberSearch}
                       onChange={(e) => setMemberSearch(e.target.value)}
@@ -1768,18 +1768,18 @@ export default function ChatPanel({ onBack }: { onBack: () => void }) {
                   </div>
                   <div className="max-h-36 overflow-y-auto space-y-1">
                     {addableUsers.map((u) => (
-                      <label key={u.id} className="flex items-center gap-2.5 rounded-lg px-1.5 py-1 hover:bg-zinc-800 cursor-pointer transition">
+                      <label key={u.id} className="flex items-center gap-2.5 rounded-lg px-1.5 py-1 hover:bg-elevated cursor-pointer transition">
                         <input
                           type="checkbox"
                           checked={newMemberIDs.includes(u.id)}
                           onChange={(e) => setNewMemberIDs((ids) => (e.target.checked ? [...ids, u.id] : ids.filter((x) => x !== u.id)))}
-                          className="h-4 w-4 accent-blue-600 rounded"
+                          className="h-4 w-4 accent-brand rounded"
                         />
                         <Avatar name={u.display_name} id={u.id} fileId={u.avatar_file_id} size="sm" />
                         <p className="text-sm truncate">{u.display_name}</p>
                       </label>
                     ))}
-                    {addableUsers.length === 0 && <p className="text-xs text-zinc-400 text-center py-2">No one else to add</p>}
+                    {addableUsers.length === 0 && <p className="text-xs text-ink-muted text-center py-2">No one else to add</p>}
                   </div>
                   <button
                     onClick={() => void handleAddMembers()}
@@ -1799,16 +1799,16 @@ export default function ChatPanel({ onBack }: { onBack: () => void }) {
                       <Avatar name={m.display_name} id={m.id} fileId={m.avatar_file_id} size="sm" />
                       <div className="min-w-0">
                         <p className="text-sm font-medium truncate">{m.display_name} {m.id === me.id && "(You)"}</p>
-                        <p className="text-xs text-zinc-400 truncate">@{m.username}</p>
+                        <p className="text-xs text-ink-muted truncate">@{m.username}</p>
                       </div>
                     </div>
                     <div className="flex items-center gap-1.5 shrink-0">
                       {m.id === group.created_by ? (
-                        <span className="text-[10px] font-semibold bg-indigo-100 dark:bg-indigo-900/40 text-blue-400 dark:text-indigo-300 px-2 py-0.5 rounded-full">
+                        <span className="text-[10px] font-semibold bg-brand/10 text-brand px-2 py-0.5 rounded-full">
                           Owner
                         </span>
                       ) : m.role === "admin" ? (
-                        <span className="text-[10px] font-semibold bg-zinc-800 text-zinc-500 text-zinc-400 px-2 py-0.5 rounded-full">
+                        <span className="text-[10px] font-semibold bg-elevated text-ink-muted text-ink-muted px-2 py-0.5 rounded-full">
                           Admin
                         </span>
                       ) : null}
@@ -1818,7 +1818,7 @@ export default function ChatPanel({ onBack }: { onBack: () => void }) {
                           disabled={roleBusyID === m.id}
                           title={m.role === "admin" ? "Remove admin" : "Make admin"}
                           aria-label={m.role === "admin" ? `Remove ${m.display_name} as admin` : `Make ${m.display_name} an admin`}
-                          className="text-[10px] font-medium text-zinc-400 hover:text-blue-400 dark:hover:text-indigo-400 px-1.5 py-0.5 rounded transition disabled:opacity-50"
+                          className="text-[10px] font-medium text-ink-muted hover:text-brand dark:hover:text-brand px-1.5 py-0.5 rounded transition disabled:opacity-50"
                         >
                           {roleBusyID === m.id ? <Loader2 className="h-3 w-3 animate-spin" /> : m.role === "admin" ? "Demote" : "Promote"}
                         </button>
@@ -1826,15 +1826,15 @@ export default function ChatPanel({ onBack }: { onBack: () => void }) {
                       {canManageGroup && m.id !== group.created_by && (
                         pendingRemoveID === m.id ? (
                           <span className="flex items-center gap-1 text-[11px]">
-                            <span className="text-zinc-400">Remove?</span>
+                            <span className="text-ink-muted">Remove?</span>
                             <button
                               onClick={() => void handleRemoveMember(m.id)}
                               disabled={removingMemberID === m.id}
-                              className="font-semibold text-rose-600 hover:underline disabled:opacity-50"
+                              className="font-semibold text-error hover:underline disabled:opacity-50"
                             >
                               {removingMemberID === m.id ? <Loader2 className="h-3 w-3 animate-spin" /> : "Yes"}
                             </button>
-                            <button onClick={() => setPendingRemoveID(null)} className="text-zinc-400 hover:underline">
+                            <button onClick={() => setPendingRemoveID(null)} className="text-ink-muted hover:underline">
                               No
                             </button>
                           </span>
@@ -1843,7 +1843,7 @@ export default function ChatPanel({ onBack }: { onBack: () => void }) {
                             onClick={() => setPendingRemoveID(m.id)}
                             title="Remove from group"
                             aria-label={`Remove ${m.display_name} from group`}
-                            className="h-6 w-6 rounded-full flex items-center justify-center text-zinc-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition"
+                            className="h-6 w-6 rounded-full flex items-center justify-center text-ink-muted hover:text-error hover:bg-error/10 dark:hover:bg-error/10 transition"
                           >
                             <UserMinus className="h-3.5 w-3.5" />
                           </button>
@@ -1855,29 +1855,29 @@ export default function ChatPanel({ onBack }: { onBack: () => void }) {
               </div>
             </div>
 
-            <div className="pt-3 border-t border-zinc-800 space-y-2">
+            <div className="pt-3 border-t border-line space-y-2">
               <a
                 href={api.exportUrl({ groupID: group.id })}
-                className="w-full inline-flex items-center justify-center gap-2 rounded-lg border border-zinc-300 dark:border-zinc-700 hover:bg-zinc-800 px-4 py-2 text-sm font-medium transition"
+                className="w-full inline-flex items-center justify-center gap-2 rounded-lg border border-line hover:bg-elevated px-4 py-2 text-sm font-medium transition"
               >
                 <Download className="h-4 w-4" />
                 Export Conversation
               </a>
               {group.created_by !== me.id && (
                 confirmLeave ? (
-                  <div className="flex items-center gap-2 rounded-lg border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-sm">
-                    <span className="flex-1 text-zinc-500">Leave this group?</span>
-                    <button onClick={() => setConfirmLeave(false)} className="font-medium text-zinc-500 hover:underline" disabled={leavingGroup}>
+                  <div className="flex items-center gap-2 rounded-lg border border-line px-3 py-2 text-sm">
+                    <span className="flex-1 text-ink-muted">Leave this group?</span>
+                    <button onClick={() => setConfirmLeave(false)} className="font-medium text-ink-muted hover:underline" disabled={leavingGroup}>
                       Cancel
                     </button>
-                    <button onClick={() => void handleLeaveGroup()} className="font-semibold text-rose-600 hover:underline disabled:opacity-50" disabled={leavingGroup}>
+                    <button onClick={() => void handleLeaveGroup()} className="font-semibold text-error hover:underline disabled:opacity-50" disabled={leavingGroup}>
                       {leavingGroup ? "Leaving…" : "Leave"}
                     </button>
                   </div>
                 ) : (
                   <button
                     onClick={() => setConfirmLeave(true)}
-                    className="w-full inline-flex items-center justify-center gap-2 rounded-lg border border-zinc-300 dark:border-zinc-700 hover:bg-zinc-800 px-4 py-2 text-sm font-medium transition"
+                    className="w-full inline-flex items-center justify-center gap-2 rounded-lg border border-line hover:bg-elevated px-4 py-2 text-sm font-medium transition"
                   >
                     <LogOut className="h-4 w-4" />
                     Leave Group
@@ -1886,19 +1886,19 @@ export default function ChatPanel({ onBack }: { onBack: () => void }) {
               )}
               {isGroupOwner && (
                 confirmDeleteGroup ? (
-                  <div className="flex items-center gap-2 rounded-lg border border-rose-300 dark:border-rose-800 bg-rose-50 dark:bg-rose-950/30 px-3 py-2 text-sm">
-                    <span className="flex-1 text-rose-700 dark:text-rose-300">Delete for everyone? This can't be undone.</span>
-                    <button onClick={() => setConfirmDeleteGroup(false)} className="font-medium text-zinc-500 hover:underline" disabled={deletingGroup}>
+                  <div className="flex items-center gap-2 rounded-lg border border-error dark:border-error/10 bg-error/10 px-3 py-2 text-sm">
+                    <span className="flex-1 text-error">Delete for everyone? This can't be undone.</span>
+                    <button onClick={() => setConfirmDeleteGroup(false)} className="font-medium text-ink-muted hover:underline" disabled={deletingGroup}>
                       Cancel
                     </button>
-                    <button onClick={handleDeleteGroup} className="font-semibold text-rose-600 hover:underline disabled:opacity-50" disabled={deletingGroup}>
+                    <button onClick={handleDeleteGroup} className="font-semibold text-error hover:underline disabled:opacity-50" disabled={deletingGroup}>
                       {deletingGroup ? "Deleting…" : "Delete"}
                     </button>
                   </div>
                 ) : (
                   <button
                     onClick={() => setConfirmDeleteGroup(true)}
-                    className="w-full inline-flex items-center justify-center gap-2 rounded-lg bg-rose-600 hover:bg-rose-500 text-white px-4 py-2 text-sm font-medium transition"
+                    className="w-full inline-flex items-center justify-center gap-2 rounded-lg bg-error hover:bg-error text-white px-4 py-2 text-sm font-medium transition"
                   >
                     <Trash2 className="h-4 w-4" />
                     Delete Group
@@ -1912,7 +1912,7 @@ export default function ChatPanel({ onBack }: { onBack: () => void }) {
 
       <Modal open={!!deleteMsgConfirm} onClose={() => setDeleteMsgConfirm(null)} title="Delete message?">
         <div className="space-y-4">
-          <p className="text-sm text-zinc-600 text-zinc-300">This can't be undone.</p>
+          <p className="text-sm text-ink-secondary text-ink-secondary">This can't be undone.</p>
           <div className="flex justify-end gap-2">
             <button type="button" className={btnSecondary} onClick={() => setDeleteMsgConfirm(null)}>
               Cancel
@@ -1981,7 +1981,7 @@ function SwipeToReply({
     >
       {dx > 0 && (
         <span
-          className="absolute -left-9 top-1/2 -translate-y-1/2 h-7 w-7 rounded-full bg-blue-600/15 text-blue-500 flex items-center justify-center"
+          className="absolute -left-9 top-1/2 -translate-y-1/2 h-7 w-7 rounded-full bg-brand/15 text-brand flex items-center justify-center"
           style={{ opacity: Math.min(dx / THRESHOLD, 1), transform: `translateY(-50%) scale(${0.6 + 0.4 * Math.min(dx / THRESHOLD, 1)})` }}
           aria-hidden="true"
         >

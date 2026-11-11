@@ -134,7 +134,7 @@ export default function App() {
   if (!initialized) {
     return (
       <div className="h-full flex items-center justify-center">
-        <Loader2 className="h-6 w-6 animate-spin text-indigo-500" />
+        <Loader2 className="h-6 w-6 animate-spin text-brand" />
       </div>
     );
   }
@@ -151,14 +151,14 @@ export default function App() {
   return (
     <>
       {isInsecureContext && (
-        <div className="bg-amber-500/15 border-b border-amber-500/30 text-amber-800 dark:text-amber-200 text-xs px-4 py-2 flex items-center justify-between z-50 shrink-0">
+        <div className="bg-warning/15 border-b border-warning/30 text-warning text-xs px-4 py-2 flex items-center justify-between z-50 shrink-0">
           <span>
             <strong>LAN HTTP Notice:</strong> Browsers require HTTPS or localhost for microphone, camera, and E2E encryption. Connect via HTTPS or install the server certificate.
           </span>
           <a
             href="/cert.pem"
             download="visioncall-ca.crt"
-            className="underline font-semibold ml-3 px-2 py-0.5 rounded bg-amber-200/50 dark:bg-amber-900/50 hover:bg-amber-300/50 text-amber-900 dark:text-amber-100"
+            className="underline font-semibold ml-3 px-2 py-0.5 rounded bg-warning/50 dark:bg-warning/10 hover:bg-warning/50 text-warning"
           >
             Download CA Certificate
           </a>

@@ -62,7 +62,7 @@ export default function Directory() {
           </div>
           <div className="flex items-center gap-2">
             <div className="relative w-full sm:w-72">
-              <Search className="absolute left-3 top-2.5 h-4 w-4 text-zinc-400" />
+              <Search className="absolute left-3 top-2.5 h-4 w-4 text-ink-muted" />
               <input
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
@@ -73,7 +73,7 @@ export default function Directory() {
                 <button
                   type="button"
                   onClick={() => setSearch("")}
-                  className="absolute right-2.5 top-2.5 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 cursor-pointer"
+                  className="absolute right-2.5 top-2.5 text-ink-muted hover:text-ink-secondary dark:hover:text-ink cursor-pointer"
                   aria-label="Clear search"
                 >
                   <X className="h-4 w-4" />
@@ -104,9 +104,9 @@ export default function Directory() {
         {!loaded && !error && <SkeletonList rows={6} />}
 
         {error && (
-          <div className="p-12 text-center flex flex-col items-center gap-3 bg-rose-950/20 border border-rose-900/50 rounded-xl">
-            <AlertTriangle className="h-10 w-10 text-rose-500" />
-            <p className="text-sm font-semibold text-rose-300">Couldn't load the directory</p>
+          <div className="p-12 text-center flex flex-col items-center gap-3 bg-error/10 border border-error/10 rounded-xl">
+            <AlertTriangle className="h-10 w-10 text-error" />
+            <p className="text-sm font-semibold text-error">Couldn't load the directory</p>
             <p className="text-xs text-ink-muted max-w-sm">{error}</p>
             <button onClick={() => void fetchUsers()} className={btnSecondary}>
               Try again

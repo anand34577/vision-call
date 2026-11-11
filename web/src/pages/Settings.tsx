@@ -295,7 +295,7 @@ export default function Settings() {
               <button
                 onClick={() => fileInput.current?.click()}
                 disabled={avatarBusy}
-                className="absolute -bottom-1 -right-1 h-9 w-9 rounded-full bg-blue-600 hover:bg-blue-500 text-white flex items-center justify-center shadow transition disabled:opacity-50"
+                className="absolute -bottom-1 -right-1 h-9 w-9 rounded-full bg-brand hover:bg-brand text-white flex items-center justify-center shadow transition disabled:opacity-50"
                 title="Change photo"
                 aria-label="Change avatar photo"
               >
@@ -315,13 +315,13 @@ export default function Settings() {
             </div>
             <div className="space-y-1 min-w-0 flex-1">
               <p className="font-semibold text-base truncate">{me.display_name}</p>
-              <p className="text-xs text-zinc-400">@{me.username} · <span className="capitalize">{me.role}</span></p>
+              <p className="text-xs text-ink-muted">@{me.username} · <span className="capitalize">{me.role}</span></p>
               {me.avatar_file_id != null && (
                 <button
                   type="button"
                   onClick={removeAvatar}
                   disabled={avatarBusy}
-                  className="text-xs text-rose-500 hover:underline flex items-center gap-1 pt-1"
+                  className="text-xs text-error hover:underline flex items-center gap-1 pt-1"
                 >
                   <Trash2 className="h-3 w-3" /> Remove photo
                 </button>
@@ -330,7 +330,7 @@ export default function Settings() {
           </div>
           <form onSubmit={save} className="space-y-3">
             <div>
-              <label htmlFor="settings-display-name" className="block text-xs font-semibold text-zinc-500 mb-1">Display Name</label>
+              <label htmlFor="settings-display-name" className="block text-xs font-semibold text-ink-muted mb-1">Display Name</label>
               <input
                 id="settings-display-name"
                 className={inputCls}
@@ -340,8 +340,8 @@ export default function Settings() {
               />
             </div>
             <div>
-              <label htmlFor="settings-email" className="block text-xs font-semibold text-zinc-500 mb-1">
-                Email <span className="font-normal text-zinc-400">(used only for password-reset emails, if your admin has enabled that)</span>
+              <label htmlFor="settings-email" className="block text-xs font-semibold text-ink-muted mb-1">
+                Email <span className="font-normal text-ink-muted">(used only for password-reset emails, if your admin has enabled that)</span>
               </label>
               <input
                 id="settings-email"
@@ -395,14 +395,14 @@ export default function Settings() {
           {/* Microphone */}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <label htmlFor="settings-mic-select" className="block text-xs font-semibold text-zinc-500">Microphone</label>
+              <label htmlFor="settings-mic-select" className="block text-xs font-semibold text-ink-muted">Microphone</label>
               <button
                 type="button"
                 onClick={() => setTestingMic((v) => !v)}
                 className={`text-xs px-2.5 py-0.5 rounded-full font-medium transition ${
                   testingMic
-                    ? "bg-rose-100 text-rose-600 dark:bg-rose-950 dark:text-rose-300"
-                    : "bg-indigo-50 text-blue-400 dark:bg-indigo-950 dark:text-indigo-300 hover:underline"
+                    ? "bg-error/10 text-error dark:bg-error/10"
+                    : "bg-brand/10 text-brand dark:bg-brand/10 hover:underline"
                 }`}
               >
                 {testingMic ? "Stop Mic Test" : "Test Microphone"}
@@ -424,14 +424,14 @@ export default function Settings() {
               ))}
             </select>
             {testingMic && (
-              <div className="space-y-1 bg-zinc-50 dark:bg-zinc-800/60 p-3 rounded-xl border border-zinc-200 dark:border-zinc-700">
-                <div className="flex justify-between text-[11px] text-zinc-400">
+              <div className="space-y-1 bg-surface dark:bg-elevated/60 p-3 rounded-xl border border-line">
+                <div className="flex justify-between text-[11px] text-ink-muted">
                   <span>Input Volume</span>
                   <span>{micLevel}%</span>
                 </div>
-                <div className="h-2 w-full bg-zinc-200 dark:bg-zinc-700 rounded-full overflow-hidden">
+                <div className="h-2 w-full bg-surface-hover-hover rounded-full overflow-hidden">
                   <div
-                    className="h-full bg-gradient-to-r from-emerald-500 via-amber-500 to-rose-500 transition-all duration-75"
+                    className="h-full bg-gradient-to-r from-success via-warning to-error transition-all duration-75"
                     style={{ width: `${micLevel}%` }}
                   />
                 </div>
@@ -442,14 +442,14 @@ export default function Settings() {
           {/* Camera */}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <label htmlFor="settings-cam-select" className="block text-xs font-semibold text-zinc-500">Camera</label>
+              <label htmlFor="settings-cam-select" className="block text-xs font-semibold text-ink-muted">Camera</label>
               <button
                 type="button"
                 onClick={() => setTestingCam((v) => !v)}
                 className={`text-xs px-2.5 py-0.5 rounded-full font-medium transition ${
                   testingCam
-                    ? "bg-rose-100 text-rose-600 dark:bg-rose-950 dark:text-rose-300"
-                    : "bg-indigo-50 text-blue-400 dark:bg-indigo-950 dark:text-indigo-300 hover:underline"
+                    ? "bg-error/10 text-error dark:bg-error/10"
+                    : "bg-brand/10 text-brand dark:bg-brand/10 hover:underline"
                 }`}
               >
                 {testingCam ? "Stop Camera Test" : "Test Camera Preview"}
@@ -471,7 +471,7 @@ export default function Settings() {
               ))}
             </select>
             {testingCam && (
-              <div className="relative aspect-video w-full rounded-xl overflow-hidden bg-black border border-zinc-200 dark:border-zinc-700">
+              <div className="relative aspect-video w-full rounded-xl overflow-hidden bg-black border border-line">
                 <video
                   ref={videoRef}
                   autoPlay
@@ -489,11 +489,11 @@ export default function Settings() {
           {/* Speaker */}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <label htmlFor="settings-speaker-select" className="block text-xs font-semibold text-zinc-500">Speaker</label>
+              <label htmlFor="settings-speaker-select" className="block text-xs font-semibold text-ink-muted">Speaker</label>
               <button
                 type="button"
                 onClick={playTestSound}
-                className="text-xs px-2.5 py-0.5 rounded-full bg-indigo-50 text-blue-400 dark:bg-indigo-950 dark:text-indigo-300 font-medium hover:underline flex items-center gap-1"
+                className="text-xs px-2.5 py-0.5 rounded-full bg-brand/10 text-brand font-medium hover:underline flex items-center gap-1"
               >
                 <Volume2 className="h-3 w-3" /> Play Test Sound
               </button>
@@ -535,7 +535,7 @@ export default function Settings() {
                 </span>
               )}
               {themeSavedBadge && !themeSaving && (
-                <span className="text-[11px] font-medium text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5 bg-emerald-50 dark:bg-emerald-950/40 px-2.5 py-1 rounded-full border border-emerald-200 dark:border-emerald-800/60 animate-modal-in">
+                <span className="text-[11px] font-medium text-success flex items-center gap-1.5 bg-success/10 px-2.5 py-1 rounded-full border border-success dark:border-success/10 animate-modal-in">
                   <CheckCircle2 className="h-3 w-3" /> Saved to DB
                 </span>
               )}
@@ -704,12 +704,12 @@ export default function Settings() {
             </div>
             <div className="flex items-center gap-1.5">
               {notifStatus === "granted" && (
-                <span className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/60 px-3 py-1 rounded-full">
+                <span className="text-xs font-semibold text-success flex items-center gap-1.5 bg-success/10 border border-success dark:border-success/10 px-3 py-1 rounded-full">
                   <CheckCircle2 className="h-3.5 w-3.5" /> Enabled
                 </span>
               )}
               {notifStatus === "denied" && (
-                <span title={window.isSecureContext ? "Blocked in browser settings" : "Needs HTTPS"} className="text-xs font-semibold text-rose-600 dark:text-rose-400 flex items-center gap-1.5 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800/60 px-3 py-1 rounded-full">
+                <span title={window.isSecureContext ? "Blocked in browser settings" : "Needs HTTPS"} className="text-xs font-semibold text-error flex items-center gap-1.5 bg-error/10 border border-error dark:border-error/10 px-3 py-1 rounded-full">
                   <XCircle className="h-3.5 w-3.5" /> Blocked
                 </span>
               )}
@@ -754,7 +754,7 @@ export default function Settings() {
                 type="button"
                 onClick={() => setShowCurrentPwd(!showCurrentPwd)}
                 aria-label={showCurrentPwd ? "Hide password" : "Show password"}
-                className="absolute right-3 top-2.5 text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-200"
+                className="absolute right-3 top-2.5 text-ink-muted hover:text-ink-secondary dark:hover:text-ink"
               >
                 {showCurrentPwd ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
               </button>
@@ -774,7 +774,7 @@ export default function Settings() {
                 type="button"
                 onClick={() => setShowNextPwd(!showNextPwd)}
                 aria-label={showNextPwd ? "Hide password" : "Show password"}
-                className="absolute right-3 top-2.5 text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-200"
+                className="absolute right-3 top-2.5 text-ink-muted hover:text-ink-secondary dark:hover:text-ink"
               >
                 {showNextPwd ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
               </button>

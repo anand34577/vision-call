@@ -47,7 +47,7 @@ export default function AdminGroups() {
             </div>
             <button
               onClick={() => setTarget(g)}
-              className="h-9 w-9 rounded-lg hover:bg-rose-50 dark:hover:bg-rose-950/40 text-ink-muted hover:text-rose-600 flex items-center justify-center"
+              className="h-9 w-9 rounded-lg hover:bg-error/10 dark:hover:bg-error/10 text-ink-muted hover:text-error flex items-center justify-center"
               title="Delete group"
               aria-label={`Delete ${g.name}`}
             >
@@ -58,8 +58,8 @@ export default function AdminGroups() {
       </ul>
       <Modal open={!!target} onClose={() => (busy ? null : setTarget(null))} title="Delete group?">
         <div className="space-y-4">
-          <p className="text-sm text-zinc-400">
-            This permanently deletes <span className="font-semibold text-zinc-900 dark:text-zinc-200">{target?.name}</span> and all of its messages for everyone. This can't be undone.
+          <p className="text-sm text-ink-muted">
+            This permanently deletes <span className="font-semibold text-ink">{target?.name}</span> and all of its messages for everyone. This can't be undone.
           </p>
           <div className="flex justify-end gap-2">
             <button className={btnSecondary} onClick={() => setTarget(null)} disabled={busy}>Cancel</button>

@@ -331,7 +331,7 @@ function ZoomableVideo({ children, className }: { children: React.ReactNode; cla
 // signal icon in Zoom/Teams/Meet.
 function NetworkIndicator({ quality }: { quality: "good" | "fair" | "poor" }) {
   const bars = quality === "good" ? 3 : quality === "fair" ? 2 : 1;
-  const color = quality === "good" ? "text-emerald-400" : quality === "fair" ? "text-amber-400" : "text-rose-400";
+  const color = quality === "good" ? "text-success" : quality === "fair" ? "text-warning" : "text-error";
   const label =
     quality === "good" ? "Good connection" : quality === "fair" ? "Fair connection — video quality may drop" : "Poor connection — video quality reduced";
   return (
@@ -640,12 +640,12 @@ function DockBtn({
 }) {
   const toneCls =
     tone === "live"
-      ? "bg-blue-600 text-white shadow-lg shadow-blue-600/30"
+      ? "bg-brand text-white shadow-lg shadow-brand/30"
       : tone === "danger"
-        ? "bg-rose-600 text-white hover:bg-rose-500 shadow-lg shadow-rose-600/30"
+        ? "bg-error text-white hover:bg-error shadow-lg shadow-error/30"
         : tone === "warn"
-          ? "bg-amber-500 text-white shadow-lg shadow-amber-500/30"
-          : "bg-zinc-800 hover:bg-zinc-700 text-white";
+          ? "bg-warning text-white shadow-lg shadow-warning/30"
+          : "bg-elevated hover:bg-surface-hover text-white";
   return (
     <button
       onClick={onClick}
@@ -653,7 +653,7 @@ function DockBtn({
       title={title}
       aria-label={ariaLabel}
       aria-pressed={pressed}
-      className={`min-w-11 h-12 shrink-0 px-2 rounded-2xl flex flex-col items-center justify-center gap-1 border border-zinc-700/50 transition-all duration-150 cursor-pointer active:scale-90 disabled:opacity-40 disabled:cursor-not-allowed ${toneCls}`}
+      className={`min-w-11 h-12 shrink-0 px-2 rounded-2xl flex flex-col items-center justify-center gap-1 border border-line/50 transition-all duration-150 cursor-pointer active:scale-90 disabled:opacity-40 disabled:cursor-not-allowed ${toneCls}`}
     >
       {children}
       <span className="hidden sm:block text-[9px] font-semibold leading-none tracking-wide">{label}</span>
@@ -773,15 +773,15 @@ function ControlsBar() {
   const btn = (active: boolean) =>
     `min-w-11 h-12 shrink-0 px-2 rounded-2xl flex flex-col items-center justify-center gap-1 transition-all duration-150 cursor-pointer border ${
       active
-        ? "bg-zinc-800 hover:bg-zinc-700 text-white active:scale-90 border-zinc-700/50"
-        : "bg-rose-600 text-white hover:bg-rose-500 active:scale-90 shadow-lg shadow-rose-600/30 border-transparent"
+        ? "bg-elevated hover:bg-surface-hover text-white active:scale-90 border-line/50"
+        : "bg-error text-white hover:bg-error active:scale-90 shadow-lg shadow-error/30 border-transparent"
     }`;
   const btnLabel = "hidden sm:block text-[9px] font-semibold leading-none tracking-wide";
 
   return (
     <>
       {sharing && (
-        <div className="absolute top-3 left-1/2 -translate-x-1/2 z-20 flex items-center gap-3 rounded-full bg-emerald-600/95 text-white text-xs font-medium pl-3.5 pr-1.5 py-1.5 shadow-xl animate-modal-in" role="status">
+        <div className="absolute top-3 left-1/2 -translate-x-1/2 z-20 flex items-center gap-3 rounded-full bg-success/95 text-white text-xs font-medium pl-3.5 pr-1.5 py-1.5 shadow-xl animate-modal-in" role="status">
           <span className="h-2 w-2 rounded-full bg-white animate-pulse" />
           You're sharing your screen
           <button onClick={() => void toggleScreen()} className="rounded-full bg-white/20 hover:bg-white/30 px-3 py-1 font-semibold cursor-pointer">
@@ -790,7 +790,7 @@ function ControlsBar() {
         </div>
       )}
       {toast && (
-        <div className="absolute top-16 left-1/2 -translate-x-1/2 bg-zinc-900/90 text-white text-sm px-4 py-2 rounded-full z-20 max-w-[90%] text-center border border-zinc-700/50 shadow-xl backdrop-blur-md animate-modal-in" role="status">
+        <div className="absolute top-16 left-1/2 -translate-x-1/2 bg-elevated/90 text-white text-sm px-4 py-2 rounded-full z-20 max-w-[90%] text-center border border-line/50 shadow-xl backdrop-blur-md animate-modal-in" role="status">
           {toast}
         </div>
       )}
@@ -864,7 +864,7 @@ function ControlsBar() {
             <span className="relative">
               <MessageSquare className="h-5 w-5" />
               {chatUnread > 0 && !inCallChat && (
-                <span className="absolute -top-2 -right-2.5 min-w-4 h-4 px-1 rounded-full bg-rose-500 text-white text-[10px] font-bold leading-4 text-center animate-modal-in">
+                <span className="absolute -top-2 -right-2.5 min-w-4 h-4 px-1 rounded-full bg-error text-white text-[10px] font-bold leading-4 text-center animate-modal-in">
                   {chatUnread > 9 ? "9+" : chatUnread}
                 </span>
               )}
@@ -878,7 +878,7 @@ function ControlsBar() {
           <div className="relative shrink-0">
             <button
               onClick={() => setShowDevices((v) => !v)}
-              className="min-w-11 h-12 px-2 rounded-2xl bg-zinc-800 hover:bg-zinc-700 text-white border border-zinc-700/50 flex flex-col items-center justify-center gap-1 transition-all duration-150 active:scale-90 cursor-pointer"
+              className="min-w-11 h-12 px-2 rounded-2xl bg-elevated hover:bg-surface-hover text-white border border-line/50 flex flex-col items-center justify-center gap-1 transition-all duration-150 active:scale-90 cursor-pointer"
               title="Devices"
               aria-label="Choose devices"
               aria-expanded={showDevices}
@@ -889,13 +889,13 @@ function ControlsBar() {
             {showDevices && createPortal(
               <>
                 <div className="fixed inset-0 z-[55]" onClick={() => setShowDevices(false)} />
-                <div role="dialog" aria-modal="true" aria-label="Audio and video settings" className="fixed bottom-24 left-1/2 -translate-x-1/2 w-[calc(100vw-2rem)] max-w-72 rounded-2xl bg-zinc-900/95 border border-zinc-700/80 p-4 space-y-3 shadow-2xl backdrop-blur-xl z-[60] animate-modal-in max-h-[60vh] overflow-y-auto">
-                  <p className="text-xs font-semibold text-zinc-300 border-b border-zinc-800 pb-2">Audio & Video Settings</p>
+                <div role="dialog" aria-modal="true" aria-label="Audio and video settings" className="fixed bottom-24 left-1/2 -translate-x-1/2 w-[calc(100vw-2rem)] max-w-72 rounded-2xl bg-elevated/95 border border-line/80 p-4 space-y-3 shadow-2xl backdrop-blur-xl z-[60] animate-modal-in max-h-[60vh] overflow-y-auto">
+                  <p className="text-xs font-semibold text-ink-secondary border-b border-line pb-2">Audio & Video Settings</p>
                   <div>
-                    <label className="text-[11px] font-medium text-zinc-400 block mb-1">Microphone</label>
+                    <label className="text-[11px] font-medium text-ink-muted block mb-1">Microphone</label>
                     <select
                       aria-label="Microphone"
-                      className="w-full rounded-xl bg-zinc-800 border border-zinc-700 text-white text-xs px-2.5 py-2 outline-none focus:ring-2 focus:ring-blue-500"
+                      className="w-full rounded-xl bg-elevated border border-line text-white text-xs px-2.5 py-2 outline-none focus:ring-2 focus:ring-brand"
                       value={selectedMic}
                       onChange={(e) => {
                         const id = e.target.value;
@@ -910,10 +910,10 @@ function ControlsBar() {
                     </select>
                   </div>
                   <div>
-                    <label className="text-[11px] font-medium text-zinc-400 block mb-1">Camera</label>
+                    <label className="text-[11px] font-medium text-ink-muted block mb-1">Camera</label>
                     <select
                       aria-label="Camera"
-                      className="w-full rounded-xl bg-zinc-800 border border-zinc-700 text-white text-xs px-2.5 py-2 outline-none focus:ring-2 focus:ring-blue-500"
+                      className="w-full rounded-xl bg-elevated border border-line text-white text-xs px-2.5 py-2 outline-none focus:ring-2 focus:ring-brand"
                       value={selectedCam}
                       onChange={(e) => {
                         const id = e.target.value;
@@ -928,10 +928,10 @@ function ControlsBar() {
                     </select>
                   </div>
                   <div>
-                    <label className="text-[11px] font-medium text-zinc-400 block mb-1">Speaker</label>
+                    <label className="text-[11px] font-medium text-ink-muted block mb-1">Speaker</label>
                     <select
                       aria-label="Speaker"
-                      className="w-full rounded-xl bg-zinc-800 border border-zinc-700 text-white text-xs px-2.5 py-2 outline-none focus:ring-2 focus:ring-blue-500"
+                      className="w-full rounded-xl bg-elevated border border-line text-white text-xs px-2.5 py-2 outline-none focus:ring-2 focus:ring-brand"
                       value={speaker}
                       onChange={(e) => {
                         const id = e.target.value;
@@ -955,7 +955,7 @@ function ControlsBar() {
                         setSelectedCam(next);
                         void switchDevice("cam", next);
                       }}
-                      className="w-full flex items-center justify-center gap-1.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-white text-xs px-3 py-2 transition"
+                      className="w-full flex items-center justify-center gap-1.5 rounded-xl bg-elevated hover:bg-surface-hover text-white text-xs px-3 py-2 transition"
                     >
                       <RefreshCcw className="h-3.5 w-3.5" /> Flip camera
                     </button>
@@ -967,7 +967,7 @@ function ControlsBar() {
           </div>
           <button
             onClick={hangup}
-            className="min-w-11 h-12 px-3 sm:px-4 shrink-0 rounded-2xl bg-rose-600 hover:bg-rose-500 text-white flex flex-col items-center justify-center gap-1 font-semibold shadow-lg shadow-rose-600/35 active:scale-95 transition-all duration-150 cursor-pointer"
+            className="min-w-11 h-12 px-3 sm:px-4 shrink-0 rounded-2xl bg-error hover:bg-error text-white flex flex-col items-center justify-center gap-1 font-semibold shadow-lg shadow-error/35 active:scale-95 transition-all duration-150 cursor-pointer"
             title="Hang up (L)"
             aria-label="Hang up"
           >
@@ -1004,8 +1004,8 @@ function SfuTile({
 
   return (
     <div
-      className={`relative bg-zinc-900/90 border rounded-2xl overflow-hidden aspect-video flex items-center justify-center group transition-all duration-300 shadow-lg ${
-        isSpeaking ? "speaking-glow ring-2 ring-blue-500 shadow-2xl shadow-blue-600/25" : "border-zinc-700/50"
+      className={`relative bg-elevated/90 border rounded-2xl overflow-hidden aspect-video flex items-center justify-center group transition-all duration-300 shadow-lg ${
+        isSpeaking ? "speaking-glow ring-2 ring-brand shadow-2xl shadow-brand/25" : "border-line/50"
       }`}
     >
       {showVideo ? (
@@ -1021,18 +1021,18 @@ function SfuTile({
         </div>
       )}
       {handRaised && (
-        <span className="absolute top-3 left-3 h-8 w-8 rounded-full bg-amber-500 text-white flex items-center justify-center shadow-lg border border-white/20">
+        <span className="absolute top-3 left-3 h-8 w-8 rounded-full bg-warning text-white flex items-center justify-center shadow-lg border border-white/20">
           <Hand className="h-4 w-4" />
         </span>
       )}
-      <div className="absolute bottom-3 left-3 flex items-center gap-1.5 bg-zinc-950/75 text-white text-xs font-medium px-3.5 py-1.5 rounded-full max-w-[85%] backdrop-blur-xl border border-white/15 shadow-md">
-        {info.host && <Crown className="h-3.5 w-3.5 text-amber-400 shrink-0" />}
-        {info.muted && <MutedBadge className="h-3.5 w-3.5 text-rose-400 shrink-0" />}
+      <div className="absolute bottom-3 left-3 flex items-center gap-1.5 bg-page/75 text-white text-xs font-medium px-3.5 py-1.5 rounded-full max-w-[85%] backdrop-blur-xl border border-white/15 shadow-md">
+        {info.host && <Crown className="h-3.5 w-3.5 text-warning shrink-0" />}
+        {info.muted && <MutedBadge className="h-3.5 w-3.5 text-error shrink-0" />}
         {isSpeaking && (
-          <span className="flex items-center gap-0.5 h-3 px-0.5 text-cyan-400 shrink-0" aria-label="Speaking">
-            <span className="w-0.5 h-2 bg-cyan-400 rounded-full animate-pulse" />
-            <span className="w-0.5 h-3 bg-indigo-400 rounded-full animate-pulse [animation-delay:0.15s]" />
-            <span className="w-0.5 h-1.5 bg-purple-400 rounded-full animate-pulse [animation-delay:0.3s]" />
+          <span className="flex items-center gap-0.5 h-3 px-0.5 text-info shrink-0" aria-label="Speaking">
+            <span className="w-0.5 h-2 bg-info rounded-full animate-pulse" />
+            <span className="w-0.5 h-3 bg-brand rounded-full animate-pulse [animation-delay:0.15s]" />
+            <span className="w-0.5 h-1.5 bg-brand rounded-full animate-pulse [animation-delay:0.3s]" />
           </span>
         )}
         <span className="truncate">{info.display_name}{isMe ? " (you)" : ""}</span>
@@ -1040,7 +1040,7 @@ function SfuTile({
       {!isMe && myInfo?.host && !info.muted && (
         <button
           onClick={() => muteParticipant(info.user_id)}
-          className="absolute top-3 right-3 opacity-100 md:opacity-0 md:group-hover:opacity-100 md:focus:opacity-100 focus:opacity-100 transition bg-black/70 hover:bg-rose-600 text-white text-xs px-2.5 py-1.5 rounded-full flex items-center gap-1 backdrop-blur-md border border-zinc-700/50 cursor-pointer"
+          className="absolute top-3 right-3 opacity-100 md:opacity-0 md:group-hover:opacity-100 md:focus:opacity-100 focus:opacity-100 transition bg-black/70 hover:bg-error text-white text-xs px-2.5 py-1.5 rounded-full flex items-center gap-1 backdrop-blur-md border border-line/50 cursor-pointer"
           title="Mute participant (host)"
           aria-label={`Mute ${info.display_name}`}
         >
@@ -1058,13 +1058,13 @@ function MiniCallCard() {
   const reconnecting = wsReconnecting || mediaReconnecting;
 
   return (
-    <div className="fixed bottom-20 md:bottom-6 right-4 z-40 w-72 md:w-80 rounded-2xl bg-zinc-900/95 border border-zinc-700 shadow-2xl p-3 text-white backdrop-blur flex flex-col gap-2">
+    <div className="fixed bottom-20 md:bottom-6 right-4 z-40 w-72 md:w-80 rounded-2xl bg-elevated/95 border border-line shadow-2xl p-3 text-white backdrop-blur flex flex-col gap-2">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2 min-w-0">
-          <span className={`h-2.5 w-2.5 rounded-full animate-pulse shrink-0 ${reconnecting ? "bg-amber-500" : "bg-emerald-500"}`} />
+          <span className={`h-2.5 w-2.5 rounded-full animate-pulse shrink-0 ${reconnecting ? "bg-warning" : "bg-success"}`} />
           <div className="min-w-0">
             <p className="text-xs font-semibold truncate">{title}</p>
-            <p className="text-[10px] text-zinc-400 flex items-center gap-1.5 tabular-nums">
+            <p className="text-[10px] text-ink-muted flex items-center gap-1.5 tabular-nums">
               {reconnecting ? "Reconnecting…" : elapsed || "Connected"}
               {!reconnecting && <NetworkIndicator quality={networkQuality} />}
             </p>
@@ -1072,18 +1072,18 @@ function MiniCallCard() {
         </div>
         <button
           onClick={() => setMinimized(false)}
-          className="h-9 w-9 rounded-lg hover:bg-zinc-700 flex items-center justify-center text-zinc-300 hover:text-white shrink-0"
+          className="h-9 w-9 rounded-lg hover:bg-surface-hover flex items-center justify-center text-ink-secondary hover:text-white shrink-0"
           title="Maximize call"
           aria-label="Maximize call"
         >
           <Maximize2 className="h-4 w-4" />
         </button>
       </div>
-      <div className="flex items-center justify-center gap-2 pt-1 border-t border-zinc-800">
+      <div className="flex items-center justify-center gap-2 pt-1 border-t border-line">
         <button
           onClick={toggleMic}
           className={`h-9 w-9 rounded-full flex items-center justify-center text-xs ${
-            micOn ? "bg-zinc-800 hover:bg-zinc-700 text-white" : "bg-rose-600 text-white"
+            micOn ? "bg-elevated hover:bg-surface-hover text-white" : "bg-error text-white"
           }`}
           title={micOn ? "Mute" : "Unmute"}
         >
@@ -1092,7 +1092,7 @@ function MiniCallCard() {
         <button
           onClick={() => void toggleCam()}
           className={`h-9 w-9 rounded-full flex items-center justify-center text-xs ${
-            camOn ? "bg-zinc-800 hover:bg-zinc-700 text-white" : "bg-rose-600 text-white"
+            camOn ? "bg-elevated hover:bg-surface-hover text-white" : "bg-error text-white"
           }`}
           title={camOn ? "Camera off" : "Camera on"}
         >
@@ -1100,7 +1100,7 @@ function MiniCallCard() {
         </button>
         <button
           onClick={hangup}
-          className="h-9 w-9 rounded-full bg-rose-600 hover:bg-rose-500 flex items-center justify-center text-white"
+          className="h-9 w-9 rounded-full bg-error hover:bg-error flex items-center justify-center text-white"
           title="End call"
         >
           <PhoneOff className="h-4 w-4" />
@@ -1172,14 +1172,14 @@ export default function CallOverlay() {
       )}
       <div className="text-center">
         <p className="text-lg font-semibold text-white">{roomTitle}</p>
-        <p className="text-sm text-zinc-400 flex items-center gap-2 justify-center mt-1">
+        <p className="text-sm text-ink-muted flex items-center gap-2 justify-center mt-1">
           <Loader2 className="h-3.5 w-3.5 animate-spin" />
           {s.status === "outgoing" ? (s.ringing ? "Ringing…" : "Calling…") : s.status === "waiting-approval" ? "Waiting for the host to let you in…" : "Connecting…"}
         </p>
       </div>
       <button
         onClick={() => s.hangup()}
-        className="h-11 px-5 rounded-full bg-rose-600 hover:bg-rose-500 text-white text-sm font-semibold shadow-lg active:scale-95 transition cursor-pointer"
+        className="h-11 px-5 rounded-full bg-error hover:bg-error text-white text-sm font-semibold shadow-lg active:scale-95 transition cursor-pointer"
       >
         Cancel
       </button>
@@ -1191,20 +1191,20 @@ export default function CallOverlay() {
   // pinch-to-zoom from grabbing two-finger gestures meant for a video's own
   // zoom (below) or the PiP's resize handle.
   return (
-    <div className="fixed inset-0 z-50 bg-zinc-950 flex flex-col touch-pan-x touch-pan-y">
+    <div className="fixed inset-0 z-50 bg-page flex flex-col touch-pan-x touch-pan-y">
       {/* header */}
-      <div className="flex items-center justify-between px-4 sm:px-6 py-3 text-white border-b border-zinc-700/50 shrink-0 bg-zinc-950/70 backdrop-blur-xl z-20">
+      <div className="flex items-center justify-between px-4 sm:px-6 py-3 text-white border-b border-line/50 shrink-0 bg-page/70 backdrop-blur-xl z-20">
         <div className="flex items-center gap-3 min-w-0">
-          <div className="h-2.5 w-2.5 rounded-full bg-emerald-500 shadow-sm shadow-emerald-500/50 animate-pulse shrink-0" />
+          <div className="h-2.5 w-2.5 rounded-full bg-success shadow-sm shadow-success/50 animate-pulse shrink-0" />
           <p className="font-semibold text-sm tracking-tight truncate">{roomTitle}</p>
-          <span className="text-xs font-mono tabular-nums font-medium text-zinc-300 bg-white/10 border border-zinc-700/50 px-2.5 py-0.5 rounded-full shrink-0">{elapsed || "Calling…"}</span>
+          <span className="text-xs font-mono tabular-nums font-medium text-ink-secondary bg-white/10 border border-line/50 px-2.5 py-0.5 rounded-full shrink-0">{elapsed || "Calling…"}</span>
           {isRecording && (
-            <span className="text-[11px] font-bold text-white bg-rose-600 px-2.5 py-0.5 rounded-full flex items-center gap-1.5 animate-pulse shrink-0" role="status" aria-label="Recording in progress">
+            <span className="text-[11px] font-bold text-white bg-error px-2.5 py-0.5 rounded-full flex items-center gap-1.5 animate-pulse shrink-0" role="status" aria-label="Recording in progress">
               <span className="h-1.5 w-1.5 rounded-full bg-white" /> REC
             </span>
           )}
           {s.mode === "sfu" && (
-            <span className="text-xs text-zinc-400 bg-zinc-800/80 px-2.5 py-0.5 rounded-full border border-zinc-700/50 hidden sm:inline-block">
+            <span className="text-xs text-ink-muted bg-elevated/80 px-2.5 py-0.5 rounded-full border border-line/50 hidden sm:inline-block">
               {s.participants.length} {s.participants.length === 1 ? "participant" : "participants"}
             </span>
           )}
@@ -1213,7 +1213,7 @@ export default function CallOverlay() {
         <div className="flex items-center gap-1.5">
           <button
             onClick={() => s.setMinimized(true)}
-            className="h-10 w-10 sm:h-8 sm:w-8 min-h-[44px] min-w-[44px] sm:min-h-0 sm:min-w-0 rounded-xl bg-white/5 hover:bg-white/15 border border-zinc-700/50 text-zinc-400 hover:text-white flex items-center justify-center transition cursor-pointer"
+            className="h-10 w-10 sm:h-8 sm:w-8 min-h-[44px] min-w-[44px] sm:min-h-0 sm:min-w-0 rounded-xl bg-white/5 hover:bg-white/15 border border-line/50 text-ink-muted hover:text-white flex items-center justify-center transition cursor-pointer"
             title="Minimize call"
             aria-label="Minimize call"
           >
@@ -1223,7 +1223,7 @@ export default function CallOverlay() {
       </div>
 
       {(s.wsReconnecting || s.mediaReconnecting) && s.status === "active" && (
-        <div className="px-4 py-1.5 bg-amber-500 text-black text-xs font-semibold flex items-center justify-center gap-1.5 shrink-0">
+        <div className="px-4 py-1.5 bg-warning text-black text-xs font-semibold flex items-center justify-center gap-1.5 shrink-0">
           <Loader2 className="h-3.5 w-3.5 animate-spin" /> Reconnecting…
         </div>
       )}
@@ -1234,7 +1234,7 @@ export default function CallOverlay() {
           {s.status === "outgoing" || s.status === "connecting" || s.status === "waiting-approval" ? (
             connectingView
           ) : s.mode === "p2p" ? (
-            <div className="flex-1 relative min-h-0 bg-zinc-900 flex items-center justify-center">
+            <div className="flex-1 relative min-h-0 bg-elevated flex items-center justify-center">
               {s.remoteStream?.getVideoTracks().length ? (
                 <ZoomableVideo className="w-full h-full">
                   <Video stream={s.remoteStream} className="w-full h-full object-contain" />
@@ -1242,25 +1242,25 @@ export default function CallOverlay() {
               ) : (
                 <div className="w-full h-full flex flex-col items-center justify-center gap-3">
                   <Avatar name={s.peer?.display_name ?? "?"} id={s.peer?.id ?? 0} fileId={s.peer?.avatar_file_id} size="xl" />
-                  <p className="text-sm text-zinc-400">{s.peer?.display_name}</p>
+                  <p className="text-sm text-ink-muted">{s.peer?.display_name}</p>
                 </div>
               )}
               {s.remoteMuted && (
-                <div className="absolute top-4 left-4 bg-rose-600/90 text-white text-xs px-2.5 py-1 rounded-lg flex items-center gap-1.5 shadow-lg backdrop-blur">
+                <div className="absolute top-4 left-4 bg-error/90 text-white text-xs px-2.5 py-1 rounded-lg flex items-center gap-1.5 shadow-lg backdrop-blur">
                   <MutedBadge className="h-3.5 w-3.5" />
                   <span>{s.peer?.display_name ?? "Peer"} is muted</span>
                 </div>
               )}
               {/* self PiP — draggable, drag it anywhere over the call view */}
               {(s.sharing ? s.localScreenStream : s.localStream)?.getVideoTracks().length && (s.sharing || s.camOn) ? (
-                <DraggablePiP defaultClassName="bottom-4 right-4" className="aspect-video rounded-xl overflow-hidden border-2 border-white/20 shadow-xl bg-zinc-800">
+                <DraggablePiP defaultClassName="bottom-4 right-4" className="aspect-video rounded-xl overflow-hidden border-2 border-white/20 shadow-xl bg-elevated">
                   <Video
                     stream={s.sharing ? s.localScreenStream : s.localStream}
                     muted
                     mirror={!s.sharing}
                     className="w-full h-full object-contain"
                   />
-                  <span className="absolute bottom-1 left-2 text-[10px] text-white/80 bg-zinc-900/80 px-1.5 rounded">You</span>
+                  <span className="absolute bottom-1 left-2 text-[10px] text-white/80 bg-elevated/80 px-1.5 rounded">You</span>
                 </DraggablePiP>
               ) : null}
             </div>
@@ -1268,7 +1268,7 @@ export default function CallOverlay() {
             <div className="flex-1 min-h-0 p-3 overflow-y-auto">
               {screenSharer && (screenStream || remoteScreenTrack) ? (
                 <div className="h-full flex flex-col gap-3">
-                  <div className="flex-1 min-h-0 bg-zinc-800 rounded-xl overflow-hidden relative">
+                  <div className="flex-1 min-h-0 bg-elevated rounded-xl overflow-hidden relative">
                     <ZoomableVideo className="w-full h-full">
                       {remoteScreenTrack ? (
                         <TrackVideo track={remoteScreenTrack} className="w-full h-full object-contain" />
@@ -1307,7 +1307,7 @@ export default function CallOverlay() {
                     />
                   ))}
                   {s.participants.length === 0 && (
-                    <p className="text-zinc-400 text-sm text-center">Joining…</p>
+                    <p className="text-ink-muted text-sm text-center">Joining…</p>
                   )}
                 </div>
               )}

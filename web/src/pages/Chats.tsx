@@ -319,7 +319,7 @@ export default function Chats() {
             </button>
           </div>
           {groupError && !showNewGroup && (
-            <p className="text-xs text-rose-600 dark:text-rose-400" role="alert">{groupError}</p>
+            <p className="text-xs text-error" role="alert">{groupError}</p>
           )}
         </div>
 
@@ -359,7 +359,7 @@ export default function Chats() {
                   <div className="relative shrink-0">
                     <Avatar name={g.name} id={g.id} fileId={g.avatar_file_id} />
                     {hasActiveCall && (
-                      <span className="absolute -top-0.5 -right-0.5 h-3.5 w-3.5 bg-emerald-500 border-2 border-surface rounded-full animate-pulse" aria-label="Live call" />
+                      <span className="absolute -top-0.5 -right-0.5 h-3.5 w-3.5 bg-success border-2 border-surface rounded-full animate-pulse" aria-label="Live call" />
                     )}
                   </div>
                   <div className="min-w-0 flex-1">
@@ -370,14 +370,14 @@ export default function Chats() {
                       {g.public && <Hash className="h-3 w-3 text-ink-muted shrink-0" aria-label="Public channel" />}
                       {convoPrefs[`g:${g.id}`]?.muted && <BellOff className="h-3 w-3 text-ink-muted shrink-0" aria-label="Muted" />}
                       {hasActiveCall && (
-                        <span className="bg-emerald-600 text-white text-[9px] font-bold px-1.5 py-px rounded-full uppercase tracking-wider shadow-xs">
+                        <span className="bg-success text-white text-[9px] font-bold px-1.5 py-px rounded-full uppercase tracking-wider shadow-xs">
                           Live
                         </span>
                       )}
                     </div>
                     <p className="text-xs text-ink-muted truncate flex items-center gap-1 mt-0.5">
                       {hasDraft(`g:${g.id}`) ? (
-                        <span className="truncate"><span className="font-semibold text-amber-600 dark:text-amber-400">Draft: </span>{(() => { try { return localStorage.getItem(`vc.draft.g:${g.id}`); } catch { return ""; } })()}</span>
+                        <span className="truncate"><span className="font-semibold text-warning">Draft: </span>{(() => { try { return localStorage.getItem(`vc.draft.g:${g.id}`); } catch { return ""; } })()}</span>
                       ) : last ? (
                         <>
                           <span className="font-medium text-ink-secondary">{last.sender?.display_name ?? ""}:</span>
@@ -398,7 +398,7 @@ export default function Chats() {
                 {hasActiveCall && (
                   <button
                     onClick={() => void startGroupCall(g)}
-                    className="h-9 px-3 mr-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold flex items-center gap-1 shrink-0 shadow-sm active:scale-95 transition cursor-pointer"
+                    className="h-9 px-3 mr-2 rounded-xl bg-success hover:bg-success text-white text-xs font-semibold flex items-center gap-1 shrink-0 shadow-sm active:scale-95 transition cursor-pointer"
                     title="Join ongoing call"
                     aria-label={`Join ongoing call in ${g.name}`}
                   >
@@ -440,7 +440,7 @@ export default function Chats() {
                   </p>
                   <p className="text-xs text-ink-muted truncate flex items-center gap-1 mt-0.5">
                     {hasDraft(`dm:${u.id}`) ? (
-                      <span className="truncate"><span className="font-semibold text-amber-600 dark:text-amber-400">Draft: </span>{(() => { try { return localStorage.getItem(`vc.draft.dm:${u.id}`); } catch { return ""; } })()}</span>
+                      <span className="truncate"><span className="font-semibold text-warning">Draft: </span>{(() => { try { return localStorage.getItem(`vc.draft.dm:${u.id}`); } catch { return ""; } })()}</span>
                     ) : (
                       <>
                         {last && !last.content && last.file && <Paperclip className="h-3 w-3 shrink-0" />}
@@ -480,16 +480,16 @@ export default function Chats() {
       {/* Browse channels */}
       <Modal open={showChannels} onClose={() => setShowChannels(false)} title="Browse channels">
         <div className="space-y-3">
-          {channelError && <p className="text-sm text-rose-600 dark:text-rose-400" role="alert">{channelError}</p>}
-          {channels === null && !channelError && <p className="text-sm text-zinc-400 flex items-center gap-2"><Loader2 className="h-4 w-4 animate-spin" /> Loading…</p>}
-          {channels?.length === 0 && <p className="text-sm text-zinc-400">There are no other public channels to join right now. Create one with the + button and switch on "Public channel".</p>}
-          <ul className="max-h-80 overflow-y-auto divide-y divide-zinc-200 dark:divide-zinc-800">
+          {channelError && <p className="text-sm text-error" role="alert">{channelError}</p>}
+          {channels === null && !channelError && <p className="text-sm text-ink-muted flex items-center gap-2"><Loader2 className="h-4 w-4 animate-spin" /> Loading…</p>}
+          {channels?.length === 0 && <p className="text-sm text-ink-muted">There are no other public channels to join right now. Create one with the + button and switch on "Public channel".</p>}
+          <ul className="max-h-80 overflow-y-auto divide-y divide-line">
             {channels?.map((g) => (
               <li key={g.id} className="flex items-center gap-3 py-2.5">
                 <Avatar name={g.name} id={g.id} fileId={g.avatar_file_id} />
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-semibold truncate flex items-center gap-1"><Hash className="h-3.5 w-3.5 shrink-0" />{g.name}</p>
-                  <p className="text-xs text-zinc-500 truncate">{g.member_count ?? 0} members{g.topic ? ` · ${g.topic}` : ""}</p>
+                  <p className="text-xs text-ink-muted truncate">{g.member_count ?? 0} members{g.topic ? ` · ${g.topic}` : ""}</p>
                 </div>
                 <button className={btnSecondary} disabled={joiningID === g.id} onClick={() => void joinChannel(g)}>
                   {joiningID === g.id ? <Loader2 className="h-4 w-4 animate-spin" /> : null} Join
@@ -504,7 +504,7 @@ export default function Chats() {
       <Modal open={showNewGroup} onClose={() => setShowNewGroup(false)} title="New Group">
         <form onSubmit={createGroup} className="space-y-4">
           <div>
-            <label htmlFor="new-group-name" className="block text-xs font-semibold text-zinc-500 mb-1">Group Name</label>
+            <label htmlFor="new-group-name" className="block text-xs font-semibold text-ink-muted mb-1">Group Name</label>
             <input
               id="new-group-name"
               className={inputCls}
@@ -517,10 +517,10 @@ export default function Chats() {
 
           <div>
             <div className="flex items-center justify-between mb-1.5">
-              <label className="block text-xs font-semibold text-zinc-500">Select Members ({members.length})</label>
+              <label className="block text-xs font-semibold text-ink-muted">Select Members ({members.length})</label>
             </div>
             <div className="relative mb-2">
-              <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-zinc-400" />
+              <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-ink-muted" />
               <input
                 value={memberSearch}
                 onChange={(e) => setMemberSearch(e.target.value)}
@@ -528,11 +528,11 @@ export default function Chats() {
                 className={`${inputCls} pl-8 py-1.5 text-xs`}
               />
             </div>
-            <div className="max-h-52 overflow-y-auto space-y-1 border border-zinc-200 dark:border-zinc-800 rounded-xl p-1.5">
+            <div className="max-h-52 overflow-y-auto space-y-1 border border-line rounded-xl p-1.5">
               {modalFilteredUsers.map((u) => (
                 <label
                   key={u.id}
-                  className="flex items-center gap-3 rounded-lg px-2 py-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer transition"
+                  className="flex items-center gap-3 rounded-lg px-2 py-1.5 hover:bg-surface-hover dark:hover:bg-elevated cursor-pointer transition"
                 >
                   <input
                     type="checkbox"
@@ -540,17 +540,17 @@ export default function Chats() {
                     onChange={(e) =>
                       setMembers((m) => (e.target.checked ? [...m, u.id] : m.filter((x) => x !== u.id)))
                     }
-                    className="h-4 w-4 accent-blue-600 rounded"
+                    className="h-4 w-4 accent-brand rounded"
                   />
                   <Avatar name={u.display_name} id={u.id} fileId={u.avatar_file_id} size="sm" />
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-medium truncate">{u.display_name}</p>
-                    <p className="text-xs text-zinc-400 truncate">@{u.username}</p>
+                    <p className="text-xs text-ink-muted truncate">@{u.username}</p>
                   </div>
                 </label>
               ))}
               {modalFilteredUsers.length === 0 && (
-                <p className="text-xs text-zinc-400 text-center py-4">No users found</p>
+                <p className="text-xs text-ink-muted text-center py-4">No users found</p>
               )}
             </div>
           </div>
@@ -558,12 +558,12 @@ export default function Chats() {
           <div className="flex items-center justify-between py-1">
             <div>
               <p className="text-sm font-medium flex items-center gap-1.5"><Hash className="h-4 w-4" /> Public channel</p>
-              <p className="text-xs text-zinc-400">Anyone on this server can find it and join. Turn off to keep it invite-only.</p>
+              <p className="text-xs text-ink-muted">Anyone on this server can find it and join. Turn off to keep it invite-only.</p>
             </div>
             <Switch checked={groupPublic} onChange={setGroupPublic} label="Public channel" />
           </div>
 
-          {groupError && <p className="text-sm text-rose-600 dark:text-rose-400" role="alert">{groupError}</p>}
+          {groupError && <p className="text-sm text-error" role="alert">{groupError}</p>}
           
           <button className={`${btnPrimary} w-full`} disabled={!groupName.trim() || creatingGroup}>
             {creatingGroup ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
@@ -586,7 +586,7 @@ export default function Chats() {
       >
         <div className="space-y-3">
           <div className="relative">
-            <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-zinc-400" />
+            <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-ink-muted" />
             <input
               autoFocus
               value={searchQuery}
@@ -604,20 +604,20 @@ export default function Chats() {
             </select>
             <input type="date" value={searchSince} onChange={(e) => setSearchSince(e.target.value)} aria-label="From date" className={`${inputCls} w-auto py-1.5 text-xs`} title="From date" />
             <input type="date" value={searchUntil} onChange={(e) => setSearchUntil(e.target.value)} aria-label="To date" className={`${inputCls} w-auto py-1.5 text-xs`} title="To date" />
-            <label className="flex items-center gap-1.5 text-zinc-500 dark:text-zinc-400">
-              <input type="checkbox" checked={searchHasFile} onChange={(e) => setSearchHasFile(e.target.checked)} className="h-3.5 w-3.5 accent-blue-600 rounded" />
+            <label className="flex items-center gap-1.5 text-ink-muted-muted">
+              <input type="checkbox" checked={searchHasFile} onChange={(e) => setSearchHasFile(e.target.checked)} className="h-3.5 w-3.5 accent-brand rounded" />
               Has attachment
             </label>
           </div>
-          {searchError && <p className="text-sm text-rose-600 dark:text-rose-400" role="alert">{searchError}</p>}
+          {searchError && <p className="text-sm text-error" role="alert">{searchError}</p>}
           <div className="max-h-96 overflow-y-auto space-y-1">
             {searching && (
-              <p className="text-xs text-zinc-400 text-center py-4 flex items-center justify-center gap-1.5">
+              <p className="text-xs text-ink-muted text-center py-4 flex items-center justify-center gap-1.5">
                 <Loader2 className="h-3.5 w-3.5 animate-spin" /> Searching…
               </p>
             )}
             {!searching && (searchQuery.trim().length >= 2 || searchSender !== 0 || searchSince || searchUntil || searchHasFile) && searchResults.length === 0 && (
-              <p className="text-xs text-zinc-400 text-center py-4">No messages found</p>
+              <p className="text-xs text-ink-muted text-center py-4">No messages found</p>
             )}
             {searchResults.map((m) => {
               const group = m.group_id ? groups.find((g) => g.id === m.group_id) : undefined;
@@ -625,10 +625,10 @@ export default function Chats() {
                 <button
                   key={m.id}
                   onClick={() => openSearchResult(m)}
-                  className="w-full text-left rounded-lg px-2.5 py-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition"
+                  className="w-full text-left rounded-lg px-2.5 py-2 hover:bg-surface-hover dark:hover:bg-elevated transition"
                 >
-                  <div className="flex items-center gap-1.5 text-xs text-zinc-400">
-                    <span className="font-semibold text-zinc-600 dark:text-zinc-300">{m.sender?.display_name ?? "Someone"}</span>
+                  <div className="flex items-center gap-1.5 text-xs text-ink-muted">
+                    <span className="font-semibold text-ink-secondary-secondary">{m.sender?.display_name ?? "Someone"}</span>
                     {group && <span>in {group.name}</span>}
                     <span className="ml-auto">{fmtDay(m.sent_at)} {fmtTime(m.sent_at)}</span>
                   </div>
@@ -647,12 +647,12 @@ export default function Chats() {
       <Modal open={showSaved} onClose={() => setShowSaved(false)} title="Saved Messages">
         <div className="max-h-96 overflow-y-auto space-y-1">
           {savedLoading && (
-            <p className="text-xs text-zinc-400 text-center py-4 flex items-center justify-center gap-1.5">
+            <p className="text-xs text-ink-muted text-center py-4 flex items-center justify-center gap-1.5">
               <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading…
             </p>
           )}
           {!savedLoading && savedList.length === 0 && (
-            <p className="text-xs text-zinc-400 text-center py-6">
+            <p className="text-xs text-ink-muted text-center py-6">
               No saved messages yet — star a message to bookmark it here.
             </p>
           )}
@@ -662,10 +662,10 @@ export default function Chats() {
               <button
                 key={m.id}
                 onClick={() => { setShowSaved(false); openSearchResult(m); }}
-                className="w-full text-left rounded-lg px-2.5 py-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition"
+                className="w-full text-left rounded-lg px-2.5 py-2 hover:bg-surface-hover dark:hover:bg-elevated transition"
               >
-                <div className="flex items-center gap-1.5 text-xs text-zinc-400">
-                  <span className="font-semibold text-zinc-600 dark:text-zinc-300">{m.sender?.display_name ?? "Someone"}</span>
+                <div className="flex items-center gap-1.5 text-xs text-ink-muted">
+                  <span className="font-semibold text-ink-secondary-secondary">{m.sender?.display_name ?? "Someone"}</span>
                   {group && <span>in {group.name}</span>}
                   <span className="ml-auto">{fmtDay(m.sent_at)} {fmtTime(m.sent_at)}</span>
                 </div>
